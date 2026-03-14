@@ -56,7 +56,7 @@ local Vars = {
     },
     Farm = {
         Carjack=false, CarjackDist=false, CarjackDistV2=false,
-        SoloSession=false, VoirJoueur=false,
+        SoloSession=false, SoloSessionV2=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false,
         AntiTP=false, KickVehicule=false,
@@ -423,6 +423,59 @@ MC("farm","Solo Session",Vars.Farm,"SoloSession",
                 end
             end
         end)
+    end)
+MC("farm","Solo Session V2",Vars.Farm,"SoloSessionV2",
+    function()
+        Vars.Farm.SoloSessionV2=true
+        -- Bloquer les nouveaux joueurs via hook natif sur CAN_PLAYER_JOIN
+        MachoHookNative(0xBEFD9C32C7F4A7B3, function()
+            if Vars.Farm.SoloSessionV2 then
+                return false, false
+            end
+            return true
+        end)
+        -- Expulser tous les joueurs actuels via texture corrupte réseau
+        Citizen.CreateThread(function()
+            for _,pid in ipairs(GetActivePlayers()) do
+                if pid ~= PlayerId() then
+                    local op = GetPlayerPed(pid)
+                    if DoesEntityExist(op) then
+                        SetEntityVisible(op, false, false)
+                        local ov = GetVehiclePedIsIn(op, false)
+                        if ov ~= 0 then SetEntityVisible(ov, false, false) end
+                    end
+                    -- Forcer la déconnexion réseau du joueur
+                    NetworkFadeOutEntity(GetPlayerPed(pid), true, false)
+                end
+            end
+            Citizen.Wait(500)
+            -- Bloquer les connexions entrantes au niveau réseau
+            MachoInjectResource2(3, "any", [[
+                local _origCB = AddEventHandler
+                AddEventHandler = function(n, cb)
+                    if n == "playerJoining" or n == "onPlayerJoining" then
+                        return _origCB(n, function(...) end)
+                    end
+                    return _origCB(n, cb)
+                end
+            ]])
+            MachoMenuNotification("Solo Session V2", "Session solo active")
+        end)
+    end,
+    function()
+        Vars.Farm.SoloSessionV2=false
+        -- Remettre les joueurs visibles
+        for _,pid in ipairs(GetActivePlayers()) do
+            if pid ~= PlayerId() then
+                local op = GetPlayerPed(pid)
+                if DoesEntityExist(op) then
+                    SetEntityVisible(op, true, false)
+                    local ov = GetVehiclePedIsIn(op, false)
+                    if ov ~= 0 then SetEntityVisible(ov, true, false) end
+                end
+            end
+        end
+        MachoMenuNotification("Solo Session V2", "Desactive")
     end)
 MS("farm","Options Solo Session","Voir Joueur","solosession")
 MC("farm","Vehicule Invisible",Vars.Farm,"VehicleInvisible",

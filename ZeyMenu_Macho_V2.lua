@@ -2,7 +2,7 @@
 --  ZeyMenu — Macho Edition V2
 --  Interface clavier identique a ZeyMenu (fleches / entree / backspace)
 --  Moteur de menu custom dessine avec DrawRect + DrawText
---  MachoHookNative + MachoInjectResource2 + MachoOnKeyDow
+--  MachoHookNative + MachoInjectResource2 + MachoOnKeyDown
 -- ============================================================
 
 -- ============================================================
@@ -1588,108 +1588,93 @@ end)
 local function FGI(veh)
     if not DoesEntityExist(veh) then return end
     local myPed = PlayerPedId()
-
-    -- Invisibilité combinée (visible + alpha)
-    SetEntityVisible(veh, false, false)
-    SetEntityAlpha(veh, 0, false)
-
-    -- Accès garanti
-    SetVehicleDoorsLocked(veh, 0)
-    SetVehicleDoorsLockedForAllPlayers(veh, false)
-
-    -- Invisibilité réseau
     local netId = NetworkGetNetworkIdFromEntity(veh)
-    if netId and netId ~= 0 then
-        SetNetworkIdVisibleInCutscene(netId, false, false)
-    end
+    local myNetId = NetworkGetNetworkIdFromEntity(myPed)
 
-    -- Conducteur toujours visible
-    local driver = GetPedInVehicleSeat(veh, -1)
-    if driver and driver ~= 0 then
-        SetEntityVisible(driver, true, false)
-        ResetEntityAlpha(driver)
-    end
-
-    -- Passagers selon option (jamais le joueur local)
-    local maxSeats = GetVehicleMaxNumberOfPassengers(veh)
-    for i = 0, maxSeats - 1 do
-        local p = GetPedInVehicleSeat(veh, i)
-        if p and p ~= 0 and p ~= myPed then
-            if Vars.Farm.PassagerVisible then
-                SetEntityVisible(p, true, false)
-                ResetEntityAlpha(p)
-            else
-                SetEntityVisible(p, false, false)
-                SetEntityAlpha(p, 0, false)
+    MachoInjectResource2(3, "any", string.format([[
+        local veh = NetworkGetEntityFromNetworkId(%d)
+        local myPed = NetworkGetEntityFromNetworkId(%d)
+        if DoesEntityExist(veh) then
+            SetEntityVisible(veh, false, false)
+            SetEntityAlpha(veh, 0, false)
+            SetVehicleDoorsLocked(veh, 0)
+            SetVehicleDoorsLockedForAllPlayers(veh, false)
+            local nId = NetworkGetNetworkIdFromEntity(veh)
+            if nId and nId ~= 0 then SetNetworkIdVisibleInCutscene(nId, false, false) end
+            -- Conducteur toujours visible
+            local driver = GetPedInVehicleSeat(veh, -1)
+            if driver and driver ~= 0 then
+                SetEntityVisible(driver, true, false)
+                ResetEntityAlpha(driver)
+            end
+            -- Joueur local toujours visible
+            if DoesEntityExist(myPed) then
+                SetEntityVisible(myPed, true, false)
+                ResetEntityAlpha(myPed)
             end
         end
-    end
-
-    -- Joueur local toujours visible
-    SetEntityVisible(myPed, true, false)
-    ResetEntityAlpha(myPed)
+    ]], netId, myNetId))
 end
 
 local function FGV(veh)
     if not DoesEntityExist(veh) then return end
-    local myPed = PlayerPedId()
-
-    SetEntityVisible(veh, true, false)
-    ResetEntityAlpha(veh)
-
     local netId = NetworkGetNetworkIdFromEntity(veh)
-    if netId and netId ~= 0 then
-        SetNetworkIdVisibleInCutscene(netId, true, true)
-    end
+    local myNetId = NetworkGetNetworkIdFromEntity(PlayerPedId())
 
-    -- Reset tous les occupants
-    local maxSeats = GetVehicleMaxNumberOfPassengers(veh)
-    for i = -1, maxSeats - 1 do
-        local p = GetPedInVehicleSeat(veh, i)
-        if p and p ~= 0 then
-            SetEntityVisible(p, true, false)
-            ResetEntityAlpha(p)
+    MachoInjectResource2(3, "any", string.format([[
+        local veh = NetworkGetEntityFromNetworkId(%d)
+        local myPed = NetworkGetEntityFromNetworkId(%d)
+        if DoesEntityExist(veh) then
+            SetEntityVisible(veh, true, false)
+            ResetEntityAlpha(veh)
+            local nId = NetworkGetNetworkIdFromEntity(veh)
+            if nId and nId ~= 0 then SetNetworkIdVisibleInCutscene(nId, true, true) end
+            local maxSeats = GetVehicleMaxNumberOfPassengers(veh)
+            for i = -1, maxSeats - 1 do
+                local p = GetPedInVehicleSeat(veh, i)
+                if p and p ~= 0 then
+                    SetEntityVisible(p, true, false)
+                    ResetEntityAlpha(p)
+                end
+            end
         end
-    end
-
-    SetEntityVisible(myPed, true, false)
-    ResetEntityAlpha(myPed)
+        if DoesEntityExist(myPed) then
+            SetEntityVisible(myPed, true, false)
+            ResetEntityAlpha(myPed)
+        end
+    ]], netId, myNetId))
 end
 
 Citizen.CreateThread(function()
     while not killmenu do
-        Citizen.Wait(50)
+        Citizen.Wait(200)
         local myPed = PlayerPedId()
         local myVeh = GetVehiclePedIsIn(myPed, false)
 
         if Vars.Farm.VehicleInvisible then
             if myVeh ~= 0 then
-                -- Nouveau véhicule détecté : reset l'ancien
                 if myVeh ~= farmGhostVeh then
                     if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
                         FGV(farmGhostVeh)
+                        Citizen.Wait(100)
                     end
                     farmGhostVeh = myVeh
                 end
-                -- Maintenir invisible chaque tick
                 FGI(farmGhostVeh)
             else
-                -- À pied : on ne touche rien, juste reset le véhicule quitté
                 if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
                     FGV(farmGhostVeh)
                 end
                 farmGhostVeh = nil
             end
         else
-            -- Option désactivée : reset propre
             if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
                 FGV(farmGhostVeh)
             end
             farmGhostVeh = nil
-            Citizen.Wait(150)
+            Citizen.Wait(300)
         end
 
-        -- AutoInvisible : dès qu'on monte dans un véhicule, activer VehicleInvisible
         if Vars.Farm.AutoInvisible and not Vars.Farm.VehicleInvisible then
             if myVeh ~= 0 then
                 Citizen.Wait(600)

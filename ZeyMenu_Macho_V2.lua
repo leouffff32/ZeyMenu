@@ -2,7 +2,7 @@
 --  ZeyMenu — Macho Edition V2
 --  Interface clavier identique a ZeyMenu (fleches / entree / backspace)
 --  Moteur de menu custom dessine avec DrawRect + DrawText
---  MachoHookNative + MachoInjectResource2 + MachoOnKeyDown
+--  MachoHookNative + MachoInjectResource2 + MachoOnKeyDow
 -- ============================================================
 
 -- ============================================================

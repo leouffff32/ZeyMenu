@@ -1535,31 +1535,72 @@ end)
 local function FGI(veh)
     if not DoesEntityExist(veh) then return end
     local myPed = PlayerPedId()
+
+    -- Invisibilité combinée (visible + alpha)
     SetEntityVisible(veh, false, false)
-    SetEntityCollision(veh, false, false)
-    -- Cacher les passagers sauf le joueur local
-    for s = -1, GetVehicleMaxNumberOfPassengers(veh) do
-        local p = GetPedInVehicleSeat(veh, s)
-        if p ~= 0 and DoesEntityExist(p) and p ~= myPed then
-            SetEntityVisible(p, Vars.Farm.PassagerVisible, false)
+    SetEntityAlpha(veh, 0, false)
+
+    -- Accès garanti
+    SetVehicleDoorsLocked(veh, 0)
+    SetVehicleDoorsLockedForAllPlayers(veh, false)
+
+    -- Invisibilité réseau
+    local netId = NetworkGetNetworkIdFromEntity(veh)
+    if netId and netId ~= 0 then
+        SetNetworkIdVisibleInCutscene(netId, false, false)
+    end
+
+    -- Conducteur toujours visible
+    local driver = GetPedInVehicleSeat(veh, -1)
+    if driver and driver ~= 0 then
+        SetEntityVisible(driver, true, false)
+        ResetEntityAlpha(driver)
+    end
+
+    -- Passagers selon option (jamais le joueur local)
+    local maxSeats = GetVehicleMaxNumberOfPassengers(veh)
+    for i = 0, maxSeats - 1 do
+        local p = GetPedInVehicleSeat(veh, i)
+        if p and p ~= 0 and p ~= myPed then
+            if Vars.Farm.PassagerVisible then
+                SetEntityVisible(p, true, false)
+                ResetEntityAlpha(p)
+            else
+                SetEntityVisible(p, false, false)
+                SetEntityAlpha(p, 0, false)
+            end
         end
     end
-    -- Toujours garder le joueur local visible
+
+    -- Joueur local toujours visible
     SetEntityVisible(myPed, true, false)
+    ResetEntityAlpha(myPed)
 end
 
 local function FGV(veh)
     if not DoesEntityExist(veh) then return end
     local myPed = PlayerPedId()
+
     SetEntityVisible(veh, true, false)
-    SetEntityCollision(veh, true, false)
-    for s = -1, GetVehicleMaxNumberOfPassengers(veh) do
-        local p = GetPedInVehicleSeat(veh, s)
-        if p ~= 0 and DoesEntityExist(p) then
+    ResetEntityAlpha(veh)
+
+    local netId = NetworkGetNetworkIdFromEntity(veh)
+    if netId and netId ~= 0 then
+        SetNetworkIdVisibleInCutscene(netId, true, true)
+    end
+
+    -- Reset tous les occupants
+    local maxSeats = GetVehicleMaxNumberOfPassengers(veh)
+    for i = -1, maxSeats - 1 do
+        local p = GetPedInVehicleSeat(veh, i)
+        if p and p ~= 0 then
             SetEntityVisible(p, true, false)
+            ResetEntityAlpha(p)
         end
     end
+
     SetEntityVisible(myPed, true, false)
+    ResetEntityAlpha(myPed)
 end
 
 Citizen.CreateThread(function()
@@ -1569,7 +1610,6 @@ Citizen.CreateThread(function()
         local myVeh = GetVehiclePedIsIn(myPed, false)
 
         if Vars.Farm.VehicleInvisible then
-            -- On doit être dans un véhicule pour que ça s'applique
             if myVeh ~= 0 then
                 -- Nouveau véhicule détecté : reset l'ancien
                 if myVeh ~= farmGhostVeh then
@@ -1581,7 +1621,7 @@ Citizen.CreateThread(function()
                 -- Maintenir invisible chaque tick
                 FGI(farmGhostVeh)
             else
-                -- À pied : rendre le dernier véhicule visible et ne rien toucher au joueur
+                -- À pied : on ne touche rien, juste reset le véhicule quitté
                 if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
                     FGV(farmGhostVeh)
                 end

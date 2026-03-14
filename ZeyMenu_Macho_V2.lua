@@ -1584,103 +1584,54 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Farm: Ghost Vehicle - thread auto-contenu injecté dans une vraie ressource
-_G._ZeyGhostActive = false
-_G._ZeyGhostVehNetId = nil
-local farmGhostVeh = nil
-local ghostThreadStarted = false
+-- Farm: Ghost Vehicle
+local function FGI(veh)
+    if not DoesEntityExist(veh) then return end
+    local myPed = PlayerPedId()
+    SetEntityVisible(veh,false,false)
+    SetEntityCollision(veh,false,false)
+    for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
+        local p=GetPedInVehicleSeat(veh,s)
+        if p~=0 and DoesEntityExist(p) and p~=myPed then
+            SetEntityVisible(p,Vars.Farm.PassagerVisible,false)
+        end
+    end
+    -- Joueur local toujours visible
+    SetEntityVisible(myPed,true,false)
+end
 
-local function StartGhostThread()
-    if ghostThreadStarted then return end
-    ghostThreadStarted = true
-    MachoInjectResource2(0, "any", [[
-        Citizen.CreateThread(function()
-            local lastVeh = nil
-            while true do
-                Citizen.Wait(50)
-                local myPed = PlayerPedId()
-                local myVeh = GetVehiclePedIsIn(myPed, false)
-
-                if _G._ZeyGhostActive then
-                    if myVeh ~= 0 then
-                        -- Nouveau véhicule : reset l'ancien
-                        if lastVeh and lastVeh ~= myVeh and DoesEntityExist(lastVeh) then
-                            SetEntityVisible(lastVeh, true, false)
-                            ResetEntityAlpha(lastVeh)
-                            local ms = GetVehicleMaxNumberOfPassengers(lastVeh)
-                            for i = -1, ms - 1 do
-                                local p = GetPedInVehicleSeat(lastVeh, i)
-                                if p and p ~= 0 then
-                                    SetEntityVisible(p, true, false)
-                                    ResetEntityAlpha(p)
-                                end
-                            end
-                        end
-                        lastVeh = myVeh
-                        -- Rendre invisible
-                        SetEntityVisible(myVeh, false, false)
-                        SetEntityAlpha(myVeh, 0, false)
-                        SetVehicleDoorsLocked(myVeh, 0)
-                        SetVehicleDoorsLockedForAllPlayers(myVeh, false)
-                        -- Joueur toujours visible
-                        SetEntityVisible(myPed, true, false)
-                        ResetEntityAlpha(myPed)
-                        -- Conducteur visible
-                        local driver = GetPedInVehicleSeat(myVeh, -1)
-                        if driver and driver ~= 0 then
-                            SetEntityVisible(driver, true, false)
-                            ResetEntityAlpha(driver)
-                        end
-                    end
-                else
-                    -- Reset le dernier véhicule
-                    if lastVeh and DoesEntityExist(lastVeh) then
-                        SetEntityVisible(lastVeh, true, false)
-                        ResetEntityAlpha(lastVeh)
-                        local ms = GetVehicleMaxNumberOfPassengers(lastVeh)
-                        for i = -1, ms - 1 do
-                            local p = GetPedInVehicleSeat(lastVeh, i)
-                            if p and p ~= 0 then
-                                SetEntityVisible(p, true, false)
-                                ResetEntityAlpha(p)
-                            end
-                        end
-                        lastVeh = nil
-                    end
-                    SetEntityVisible(myPed, true, false)
-                    ResetEntityAlpha(myPed)
-                end
-            end
-        end)
-    ]])
+local function FGV(veh)
+    if not DoesEntityExist(veh) then return end
+    SetEntityVisible(veh,true,false)
+    SetEntityCollision(veh,true,false)
+    for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
+        local p=GetPedInVehicleSeat(veh,s)
+        if p~=0 and DoesEntityExist(p) then
+            SetEntityVisible(p,true,false)
+        end
+    end
+    SetEntityVisible(PlayerPedId(),true,false)
 end
 
 Citizen.CreateThread(function()
-    StartGhostThread()
     while not killmenu do
-        Citizen.Wait(100)
-        local myPed = PlayerPedId()
-        local myVeh = GetVehiclePedIsIn(myPed, false)
-
+        Citizen.Wait(50)
+        local myPed=PlayerPedId(); local myVeh=GetVehiclePedIsIn(myPed,false)
         if Vars.Farm.VehicleInvisible then
-            _G._ZeyGhostActive = true
-        else
-            _G._ZeyGhostActive = false
-            farmGhostVeh = nil
-        end
-
-        -- AutoInvisible
+            if myVeh~=0 and myVeh~=farmGhostVeh then
+                if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGV(farmGhostVeh) end
+                farmGhostVeh=myVeh
+            end
+            if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGI(farmGhostVeh) end
+        elseif farmGhostVeh then FGV(farmGhostVeh); farmGhostVeh=nil end
         if Vars.Farm.AutoInvisible and not Vars.Farm.VehicleInvisible then
-            if myVeh ~= 0 and myVeh ~= farmGhostVeh then
-                farmGhostVeh = myVeh
-                Citizen.Wait(600)
-                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then
-                    Vars.Farm.VehicleInvisible = true
-                end
+            if myVeh~=0 and myVeh~=farmGhostVeh then
+                Citizen.Wait(800)
+                local vN=GetVehiclePedIsIn(myPed,false)
+                if vN~=0 then farmGhostVeh=vN; Vars.Farm.VehicleInvisible=true end
             end
         end
     end
-    _G._ZeyGhostActive = false
 end)
 
 Citizen.CreateThread(function()

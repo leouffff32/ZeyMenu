@@ -1839,7 +1839,7 @@ Citizen.CreateThread(function()
             if IsControlJustPressed(0,38) then
                 local myPed = PlayerPedId()
                 local myVeh = GetVehiclePedIsIn(myPed, false)
-                if myVeh ~= 0 and GetPedInVehicleSeat(myVeh, -1) == myPed then
+                if myVeh ~= 0 then
                     -- Toutes les tentatives locales pour faire tomber les roues
                     for w = 0, 5 do
                         -- Méthode 1: BreakOffVehicleWheel direct
@@ -1861,7 +1861,7 @@ Citizen.CreateThread(function()
                     end
                     MachoMenuNotification("Enleve Roue","Roues detachees")
                 else
-                    MachoMenuNotification("Enleve Roue","Tu dois etre conducteur")
+                    MachoMenuNotification("Enleve Roue","Monte dans un vehicule d abord")
                 end
             end
         else Citizen.Wait(100) end

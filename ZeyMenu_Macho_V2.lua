@@ -380,9 +380,9 @@ MC("new","Kick Vehicule [E]",Vars.Farm,"KickVehicule",
     function() Vars.Farm.KickVehicule=true
         MachoMenuNotification("Kick Veh","E pour prendre le vehicule du joueur") end,
     function() Vars.Farm.KickVehicule=false end)
-MC("new","Eject TP [E]",Vars.Farm,"EjectTP",
+MC("new","Enleve Roue [E]",Vars.Farm,"EjectTP",
     function() Vars.Farm.EjectTP=true
-        MachoMenuNotification("Eject TP","E pour faire peter les roues et tp a la fete foraine") end,
+        MachoMenuNotification("Enleve Roue","E pour faire tomber les roues du vehicule") end,
     function() Vars.Farm.EjectTP=false end)
 
 -- FARM
@@ -1834,17 +1834,34 @@ Citizen.CreateThread(function()
             if IsControlJustPressed(0,38) then ExecKickVehicule() end
         elseif Vars.Farm.EjectTP then
             BeginTextCommandDisplayHelp("STRING")
-            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Eject TP Fete Foraine")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Enleve Roue")
             EndTextCommandDisplayHelp(0,false,false,-1)
             if IsControlJustPressed(0,38) then
                 local myPed = PlayerPedId()
                 local myVeh = GetVehiclePedIsIn(myPed, false)
-                if myVeh ~= 0 then
+                if myVeh ~= 0 and GetPedInVehicleSeat(myVeh, -1) == myPed then
+                    -- Toutes les tentatives locales pour faire tomber les roues
                     for w = 0, 5 do
+                        -- Méthode 1: BreakOffVehicleWheel direct
                         BreakOffVehicleWheel(myVeh, w, false, false, true, false)
+                        -- Méthode 2: avec detach
+                        BreakOffVehicleWheel(myVeh, w, true, true, true, true)
                     end
+                    -- Méthode 3: SetVehicleWheelBreakForce sur chaque roue
+                    for w = 0, 5 do
+                        SetVehicleWheelDetachDuring(myVeh, w, true)
+                    end
+                    -- Méthode 4: dégâts extrêmes sur le véhicule pour forcer la détache
+                    SetVehicleBodyHealth(myVeh, 0.0)
+                    SetVehicleEngineHealth(myVeh, -4000.0)
+                    SetVehiclePetrolTankHealth(myVeh, -4000.0)
+                    for w = 0, 5 do
+                        SetVehicleTyreBurst(myVeh, w, true, 1000.0)
+                        SetVehicleWheelHealth(myVeh, w, -100.0)
+                    end
+                    MachoMenuNotification("Enleve Roue","Roues detachees")
                 else
-                    MachoMenuNotification("Eject TP","Monte dans un vehicule d abord")
+                    MachoMenuNotification("Enleve Roue","Tu dois etre conducteur")
                 end
             end
         else Citizen.Wait(100) end

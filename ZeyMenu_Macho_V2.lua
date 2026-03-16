@@ -59,7 +59,7 @@ local Vars = {
         SoloSession=false, SoloSessionV2=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false,
-        AntiTP=false, KickVehicule=false,
+        AntiTP=false, KickVehicule=false, EjectTP=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -380,6 +380,10 @@ MC("new","Kick Vehicule [E]",Vars.Farm,"KickVehicule",
     function() Vars.Farm.KickVehicule=true
         MachoMenuNotification("Kick Veh","E pour prendre le vehicule du joueur") end,
     function() Vars.Farm.KickVehicule=false end)
+MC("new","Eject TP [E]",Vars.Farm,"EjectTP",
+    function() Vars.Farm.EjectTP=true
+        MachoMenuNotification("Eject TP","E pour faire peter les roues et tp a la fete foraine") end,
+    function() Vars.Farm.EjectTP=false end)
 
 -- FARM
 CreateMenu("farm", "Farm", "main")
@@ -1587,17 +1591,12 @@ end)
 -- Farm: Ghost Vehicle
 local function FGI(veh)
     if not DoesEntityExist(veh) then return end
-    local myPed = PlayerPedId()
     SetEntityVisible(veh,false,false)
     SetEntityCollision(veh,false,false)
     for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
         local p=GetPedInVehicleSeat(veh,s)
-        if p~=0 and DoesEntityExist(p) and p~=myPed then
-            SetEntityVisible(p,Vars.Farm.PassagerVisible,false)
-        end
+        if p~=0 and DoesEntityExist(p) then SetEntityVisible(p,Vars.Farm.PassagerVisible,false) end
     end
-    -- Joueur local toujours visible
-    SetEntityVisible(myPed,true,false)
 end
 
 local function FGV(veh)
@@ -1606,11 +1605,8 @@ local function FGV(veh)
     SetEntityCollision(veh,true,false)
     for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
         local p=GetPedInVehicleSeat(veh,s)
-        if p~=0 and DoesEntityExist(p) then
-            SetEntityVisible(p,true,false)
-        end
+        if p~=0 and DoesEntityExist(p) then SetEntityVisible(p,true,false) end
     end
-    SetEntityVisible(PlayerPedId(),true,false)
 end
 
 Citizen.CreateThread(function()
@@ -1836,6 +1832,33 @@ Citizen.CreateThread(function()
             AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Kick Vehicule")
             EndTextCommandDisplayHelp(0,false,false,-1)
             if IsControlJustPressed(0,38) then ExecKickVehicule() end
+        elseif Vars.Farm.EjectTP then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Eject TP Fete Foraine")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local myPed = PlayerPedId()
+                local myVeh = GetVehiclePedIsIn(myPed, false)
+                if myVeh ~= 0 then
+                    Citizen.CreateThread(function()
+                        -- Faire tomber toutes les roues du vehicule
+                        for w = 0, 5 do
+                            BreakOffVehicleWheel(myVeh, w, false, false, true, false)
+                        end
+                        -- Attendre 0.7s
+                        Citizen.Wait(700)
+                        -- TP le ped seul a la fete foraine
+                        if IsPedInAnyVehicle(myPed, false) then
+                            TaskLeaveVehicle(myPed, myVeh, 262144)
+                            Citizen.Wait(200)
+                        end
+                        SetEntityCoords(myPed, -1653.00, -1125.00, 13.00, false, false, false, false)
+                        MachoMenuNotification("Eject TP","Teleporte a la fete foraine")
+                    end)
+                else
+                    MachoMenuNotification("Eject TP","Monte dans un vehicule d abord")
+                end
+            end
         else Citizen.Wait(100) end
     end
 end)

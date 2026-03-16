@@ -1840,21 +1840,9 @@ Citizen.CreateThread(function()
                 local myPed = PlayerPedId()
                 local myVeh = GetVehiclePedIsIn(myPed, false)
                 if myVeh ~= 0 then
-                    Citizen.CreateThread(function()
-                        -- Faire tomber toutes les roues du vehicule
-                        for w = 0, 5 do
-                            BreakOffVehicleWheel(myVeh, w, false, false, true, false)
-                        end
-                        -- Attendre 0.7s
-                        Citizen.Wait(700)
-                        -- TP le ped seul a la fete foraine
-                        if IsPedInAnyVehicle(myPed, false) then
-                            TaskLeaveVehicle(myPed, myVeh, 262144)
-                            Citizen.Wait(200)
-                        end
-                        SetEntityCoords(myPed, -1653.00, -1125.00, 13.00, false, false, false, false)
-                        MachoMenuNotification("Eject TP","Teleporte a la fete foraine")
-                    end)
+                    for w = 0, 5 do
+                        BreakOffVehicleWheel(myVeh, w, false, false, true, false)
+                    end
                 else
                     MachoMenuNotification("Eject TP","Monte dans un vehicule d abord")
                 end

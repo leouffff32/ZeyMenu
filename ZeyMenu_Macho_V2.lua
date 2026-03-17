@@ -58,8 +58,8 @@ local Vars = {
         Carjack=false, CarjackDist=false, CarjackDistV2=false,
         SoloSession=false, SoloSessionV2=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
-        CollisionVehicule=true, FDescendreJoueur=false,
-        AntiTP=false, KickVehicule=false, EjectTP=false, PedSpam=false, FakeDeath=false,
+        CollisionVehicule=true, FDescendreJoueur=false, FDescendreJoueurV2=false,
+        AntiTP=false, KickVehicule=false, EjectTP=false, PedSpam=false, FakeDeath=false, TPVehicle=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -196,11 +196,13 @@ MachoHookNative(0xFDEBD59D3C09C26C, function(resourceName)
 end)
 
 -- [ANTI-TP] SET_ENTITY_COORDS
+-- On sauvegarde la position et on la force en retour = zero freeze
 MachoHookNative(0x06843DA7060A026B, function(entity, x, y, z)
     if Vars.Farm.AntiTP and entity == PlayerPedId() then
         local c = GetEntityCoords(entity)
         if #(c - vector3(x,y,z)) > 5.0 then
-            MachoMenuNotification("Anti-TP","TP bloque")
+            -- Retourner immediatement sans laisser le moteur traiter
+            -- On ne fait PAS de notification ici pour eviter tout lag
             return false
         end
     end
@@ -227,7 +229,6 @@ end)
 -- [ANTI-TP] FREEZE_ENTITY_POSITION externe
 MachoHookNative(0x428CA6DBD1094446, function(entity, toggle)
     if Vars.Farm.AntiTP and entity == PlayerPedId() and toggle == true then
-        MachoMenuNotification("Anti-TP","Freeze externe bloque")
         return false
     end
     return true
@@ -238,6 +239,34 @@ MachoHookNative(0x9AFEFF481A85AB2E, function(ped, x, y, z)
     if Vars.Farm.AntiTP and ped == PlayerPedId() then
         local c = GetEntityCoords(ped)
         if #(c - vector3(x,y,z)) > 5.0 then return false end
+    end
+    return true
+end)
+
+-- [ANTI-TP] START_ENTITY_FIRE — bloquer combustion forcee
+MachoHookNative(0xF6A9D9708F6F23DF, function(entity)
+    if Vars.Farm.AntiTP and entity == PlayerPedId() then
+        return false
+    end
+    return true
+end)
+
+-- [ANTI-TP] APPLY_FORCE_TO_ENTITY — bloquer fling force
+MachoHookNative(0xC5F68BE9613E2D18, function(entity)
+    if Vars.Farm.AntiTP and entity == PlayerPedId() then
+        return false
+    end
+    return true
+end)
+
+-- [ANTI-TP] SET_ENTITY_VELOCITY — bloquer fling via velocity
+MachoHookNative(0x1C99BB7B6E96D16F, function(entity, x, y, z)
+    if Vars.Farm.AntiTP and entity == PlayerPedId() then
+        local vz = z or 0
+        -- Bloquer seulement les velocities extremes (fling)
+        if vz > 30.0 or math.abs(x or 0) > 50.0 or math.abs(y or 0) > 50.0 then
+            return false
+        end
     end
     return true
 end)
@@ -359,6 +388,9 @@ MC("new","Collision Vehicule",Vars.Farm,"CollisionVehicule",
 MC("new","F Descendre Joueur",Vars.Farm,"FDescendreJoueur",
     function() Vars.Farm.FDescendreJoueur=true end,
     function() Vars.Farm.FDescendreJoueur=false end)
+MC("new","F Descendre Joueur V2",Vars.Farm,"FDescendreJoueurV2",
+    function() Vars.Farm.FDescendreJoueurV2=true end,
+    function() Vars.Farm.FDescendreJoueurV2=false end)
 MC("new","Anti-TP",Vars.Farm,"AntiTP",
     function() Vars.Farm.AntiTP=true; _G._ZeyAntiTP=true
         MachoMenuNotification("Anti-TP","Actif") end,
@@ -395,6 +427,15 @@ MC("new","Fake Death","Vars.Farm","FakeDeath",
     function()
         Vars.Farm.FakeDeath = false
         MachoMenuNotification("Fake Death","Desactive — serveur te voit vivant")
+    end)
+MC("new","TP Dans Vehicule [E]",Vars.Farm,"TPVehicle",
+    function()
+        Vars.Farm.TPVehicle = true
+        MachoMenuNotification("TP Vehicule","Actif — E pour entrer dans le vehicule le plus proche")
+    end,
+    function()
+        Vars.Farm.TPVehicle = false
+        MachoMenuNotification("TP Vehicule","Desactive")
     end)
 
 -- FARM
@@ -708,8 +749,141 @@ MC("self","Night Vision","",nil,
     function() SetNightvision(true) end,
     function() SetNightvision(false) end)
 MB("self","Toggle Noclip","", function()
-    noclipping=not noclipping
-    MachoMenuNotification("Noclip",noclipping and "Active" or "Desactive")
+    noclipping = not noclipping
+    MachoMenuNotification("Noclip", noclipping and "Active" or "Desactive")
+    if noclipping then
+        Citizen.CreateThread(function()
+            local ped   = PlayerPedId()
+            local speed = 0.08  -- vitesse de base beaucoup plus basse
+
+            -- Rendre invisible et sans collision
+            SetEntityVisible(ped, false, false)
+            SetEntityCollision(ped, false, false)
+            FreezeEntityPosition(ped, true)
+
+            while noclipping do
+                Citizen.Wait(0)
+                ped = PlayerPedId()
+
+                -- Bloquer tous les controles du joueur sauf ceux qu on gere
+                DisableAllControlActions(0)
+                -- Garder ESC et les touches menu
+                EnableControlAction(0, 199, true) -- ESC
+                EnableControlAction(0, 200, true) -- Return
+                EnableControlAction(0, 249, true) -- Push to talk
+
+                -- Lire la direction de la camera (pas du perso)
+                -- GetGameplayCamRot retourne pitch/roll/yaw en degres
+                local camRot = GetGameplayCamRot(2)
+                local camFwd = GetGameplayCamForwardVector()
+
+                -- Vecteur avant: direction ou regarde la cam (ignore le pitch pour ZQSD)
+                -- On projette sur le plan horizontal pour Z/S
+                local fwdH = vector3(camFwd.x, camFwd.y, 0.0)
+                local fwdHLen = math.sqrt(fwdH.x*fwdH.x + fwdH.y*fwdH.y)
+                if fwdHLen > 0.001 then
+                    fwdH = vector3(fwdH.x/fwdHLen, fwdH.y/fwdHLen, 0.0)
+                end
+
+                -- Vecteur droite: perpendiculaire au vecteur avant
+                local right = vector3(fwdH.y, -fwdH.x, 0.0)
+
+                -- Vecteur haut: toujours Z pur
+                local up = vector3(0.0, 0.0, 1.0)
+
+                -- Molette = ajuster la vitesse de base
+                -- Scroll up = plus vite, Scroll down = plus lent
+                if IsDisabledControlJustPressed(0, 15) then  -- molette haut
+                    speed = math.min(speed * 1.35, 5.0)
+                end
+                if IsDisabledControlJustPressed(0, 14) then  -- molette bas
+                    speed = math.max(speed / 1.35, 0.01)
+                end
+
+                -- Vitesse adaptative: Shift = rapide, Ctrl = lent
+                local curSpeed = speed
+                if IsDisabledControlPressed(0, 21) then  -- Shift
+                    curSpeed = speed * 4.0
+                elseif IsDisabledControlPressed(0, 36) then  -- Ctrl
+                    curSpeed = speed * 0.25
+                end
+
+                -- Calculer le mouvement depuis les touches ZQSD
+                local move = vector3(0.0, 0.0, 0.0)
+
+                -- Z = avant (dans la direction de la cam, axe horizontal)
+                if IsDisabledControlPressed(0, 32) then  -- W/Z
+                    move = vector3(move.x + fwdH.x, move.y + fwdH.y, move.z)
+                end
+                -- S = arriere
+                if IsDisabledControlPressed(0, 33) then  -- S
+                    move = vector3(move.x - fwdH.x, move.y - fwdH.y, move.z)
+                end
+                -- Q = gauche
+                if IsDisabledControlPressed(0, 34) then  -- A/Q
+                    move = vector3(move.x - right.x, move.y - right.y, move.z)
+                end
+                -- D = droite
+                if IsDisabledControlPressed(0, 35) then  -- D
+                    move = vector3(move.x + right.x, move.y + right.y, move.z)
+                end
+                -- Espace = monter
+                if IsDisabledControlPressed(0, 22) then  -- Space
+                    move = vector3(move.x, move.y, move.z + 1.0)
+                end
+                -- Ctrl = descendre (double usage avec slow)
+                if IsDisabledControlPressed(0, 36) and not IsDisabledControlPressed(0, 21) then
+                    move = vector3(move.x, move.y, move.z - 1.0)
+                end
+
+                -- Si on appuie sur avant/arriere ET qu on regarde vers le haut/bas
+                -- inclure la composante verticale de la cam (regarder en l air = monter)
+                if IsDisabledControlPressed(0, 32) then
+                    move = vector3(move.x, move.y, move.z + camFwd.z)
+                end
+                if IsDisabledControlPressed(0, 33) then
+                    move = vector3(move.x, move.y, move.z - camFwd.z)
+                end
+
+                -- Normaliser si deplacement diagonal
+                local moveLen = math.sqrt(move.x*move.x + move.y*move.y + move.z*move.z)
+                if moveLen > 0.001 then
+                    move = vector3(
+                        (move.x/moveLen) * curSpeed,
+                        (move.y/moveLen) * curSpeed,
+                        (move.z/moveLen) * curSpeed
+                    )
+                end
+
+                -- Afficher la vitesse actuelle en bas de l ecran
+                SetTextFont(0)
+                SetTextScale(0.3, 0.3)
+                SetTextColour(255, 255, 255, 180)
+                BeginTextCommandDisplayText("STRING")
+                AddTextComponentSubstringPlayerName(
+                    string.format("Noclip  vitesse: %.2f  [molette +/-]  [Shift x4]  [Ctrl x0.25]", speed)
+                )
+                EndTextCommandDisplayText(0.5, 0.96)
+
+                -- Appliquer la position
+                local pos = GetEntityCoords(ped)
+                local newPos = vector3(pos.x + move.x, pos.y + move.y, pos.z + move.z)
+
+                SetEntityCoords(ped, newPos.x, newPos.y, newPos.z,
+                    false, false, false, false)
+
+                -- Le perso ne bouge pas visuellement — heading fixe
+                -- (pas de SetEntityHeading = il garde son orientation d origine)
+
+            end
+
+            -- Restaurer quand on desactive
+            ped = PlayerPedId()
+            SetEntityVisible(ped, true, false)
+            SetEntityCollision(ped, true, false)
+            FreezeEntityPosition(ped, false)
+        end)
+    end
 end)
 MB("self","Refill Health","", function() SetEntityHealth(PlayerPedId(),200) end)
 MB("self","Refill Armour","", function() SetPedArmour(PlayerPedId(),100) end)
@@ -2332,6 +2506,123 @@ Citizen.CreateThread(function()
     end
 end)
 
+-- ── 12. MASQUER POSITION RESEAU — NOCLIP ET TELEPORT ────────
+-- Le serveur recoit les mises a jour de position via le network sync natif
+-- On intercepte les natives que le serveur/AC utilisent pour lire notre position
+-- et retourner une position "plausible" pendant noclip ou apres un TP
+
+-- Position "officielle" que le serveur voit — mise a jour seulement quand on marche normalement
+_G._ZeyFakePos    = nil
+_G._ZeyFakeSpeed  = nil
+_G._ZeyPosStealthActive = false
+
+-- [NOCLIP/TP STEALTH] GET_ENTITY_COORDS — retourner pos interpolee au serveur
+-- Hash 0x3FEF770D40960D5A deja hooke pour SafeMode
+-- On ajoute la logique noclip/tp dessus via le thread
+
+-- [NOCLIP/TP] GET_ENTITY_SPEED — retourner vitesse normale meme si on va vite
+MachoHookNative(0x6D5BCA5B13E72F3B, function(entity)
+    if entity == PlayerPedId() then
+        if _G._ZeyPosStealthActive then
+            -- Retourner une vitesse de marche normale
+            return false, math.random(0, 4) * 0.1 + 1.2
+        end
+        if Vars.Vehicle.speedboost then
+            return false, math.min(GetEntitySpeed(entity), 40.0)
+        end
+    end
+    return true
+end)
+
+-- [NOCLIP/TP] GET_ENTITY_COORDS — retourner position fake pendant noclip/tp
+MachoHookNative(0x3FEF770D40960D5A, function(entity, alive)
+    local myPed = PlayerPedId()
+    if entity == myPed then
+        if SafeMode then
+            local c = GetEntityCoords(myPed)
+            return false, c.x + math.random(-2,2)*0.001,
+                          c.y + math.random(-2,2)*0.001, c.z
+        end
+        if _G._ZeyPosStealthActive and _G._ZeyFakePos then
+            -- Retourner la derniere position "normale" connue
+            local fp = _G._ZeyFakePos
+            return false, fp.x, fp.y, fp.z
+        end
+    end
+    return true
+end)
+
+-- Thread qui gere la position fake et detecte noclip/TP
+Citizen.CreateThread(function()
+    local lastGroundPos = nil
+    local stealthTimer  = 0
+    local STEALTH_DURATION = 3000  -- masquer pendant 3s apres un TP/noclip rapide
+
+    while not killmenu do
+        Citizen.Wait(0)
+        local ped = PlayerPedId()
+        local c   = GetEntityCoords(ped)
+        local now = GetGameTimer()
+
+        local isNoclipping = noclipping  -- variable globale du menu
+
+        -- Detecter un TP brutal (saut de position > 20m en 1 frame sans vehicule)
+        local isTeleporting = false
+        if lastGroundPos and not IsPedInAnyVehicle(ped, false) and not isNoclipping then
+            local jumpDist = #(c - lastGroundPos)
+            if jumpDist > 20.0 then
+                isTeleporting = true
+            end
+        end
+
+        if isNoclipping or isTeleporting then
+            -- Activer stealth: le serveur voit notre derniere bonne position
+            _G._ZeyPosStealthActive = true
+            stealthTimer = now + STEALTH_DURATION
+            -- Ne pas mettre a jour lastGroundPos pendant noclip
+        else
+            -- Mouvement normal: mettre a jour la position fake progressivement
+            if now > stealthTimer then
+                _G._ZeyPosStealthActive = false
+            end
+            -- Enregistrer comme "bonne" position seulement si au sol
+            local onGround, gz = GetGroundZFor_3dCoord(c.x, c.y, c.z + 1.0, false)
+            if onGround and math.abs(c.z - gz) < 2.0 then
+                lastGroundPos  = c
+                _G._ZeyFakePos = c
+            end
+        end
+    end
+end)
+
+-- ── 13. BLOQUER WATCHDOG — MODULE DETECTE DANS FXMANIFEST ───
+-- modules/watchdog/server/main.lua surveille positions/vitesses
+-- On injecte dans son contexte pour corrompre ses donnees de surveillance
+MachoInjectResource2(3, "any", [[
+    -- Bloquer les events watchdog cote client
+    local _oTSE = TriggerServerEvent
+    local _wdPatterns = {
+        "watchdog", "wd:", "wd_", "position:report",
+        "speed:report", "coords:update", "player:position",
+        "sync:position", "netpos", "network:position"
+    }
+    local _origTSE = TriggerServerEvent
+    TriggerServerEvent = function(name, ...)
+        if name then
+            local nl = string.lower(tostring(name))
+            for _, p in ipairs(_wdPatterns) do
+                if string.find(nl, p, 1, true) then return end
+            end
+        end
+        return _origTSE(name, ...)
+    end
+]])
+
+-- ── 14. HOOK GET_ENTITY_COORDS POUR WATCHDOG ─────────────────
+-- Watchdog lit notre position via des natives dans un thread serveur
+-- Le hook retourne une position plausible quand stealth est actif
+-- (deja gere dans le hook 0x3FEF770D40960D5A ci-dessus)
+
 -- ============================================================
 -- INJECTION MACHO — SOLO SESSION bypass via resource legitime
 -- ============================================================
@@ -2855,40 +3146,183 @@ end)
 
 -- ============================================================
 -- THREAD F DESCENDRE JOUEUR
+-- Comportement GTA: ton perso fait l animation de carjack
+-- sort le conducteur de force et prend sa place
 -- ============================================================
 
 Citizen.CreateThread(function()
+    local carjackBusy = false
     while not killmenu do
         Citizen.Wait(0)
-        if Vars.Farm.FDescendreJoueur then
+        if Vars.Farm.FDescendreJoueur and not carjackBusy then
             local myPed = PlayerPedId()
-            local myVeh = GetVehiclePedIsIn(myPed, false)
-            if myVeh ~= 0 then
-                DisableControlAction(0, 23, true)
-                if IsDisabledControlJustPressed(0, 23) then
-                    for _,pid in ipairs(GetActivePlayers()) do
-                        if pid ~= PlayerId() then
-                            local tp = GetPlayerPed(pid)
-                            if GetVehiclePedIsIn(tp, false) == myVeh then
-                                local nId = NetworkGetNetworkIdFromEntity(tp)
-                                if nId and nId ~= 0 then
-                                    SetNetworkIdCanMigrate(nId, true)
-                                    NetworkRequestControlOfEntity(tp)
-                                end
-                                Citizen.Wait(100)
-                                if NetworkHasControlOfEntity(tp) then
-                                    ClearPedTasksImmediately(tp)
-                                    TaskLeaveVehicle(tp, myVeh, 0)
-                                else
-                                    if NetworkHasControlOfEntity(myVeh) then
-                                        SetVehicleUndriveable(myVeh, true)
-                                        Citizen.Wait(600)
-                                        SetVehicleUndriveable(myVeh, false)
-                                    end
-                                end
+
+            -- Uniquement si on est a PIED (pas deja dans un vehicule)
+            if not IsPedInAnyVehicle(myPed, false) then
+                local myC = GetEntityCoords(myPed)
+
+                -- Trouver le vehicule occupe le plus proche (joueur ou PNJ)
+                local bestVeh, bestDriver, bestDist = nil, nil, 6.0
+
+                for _, veh in ipairs(GetGamePool("CVehicle")) do
+                    if DoesEntityExist(veh) then
+                        local driver = GetPedInVehicleSeat(veh, -1)
+                        if driver ~= 0 and DoesEntityExist(driver) and driver ~= myPed then
+                            local d = #(myC - GetEntityCoords(veh))
+                            if d < bestDist then
+                                bestDist = d
+                                bestVeh  = veh
+                                bestDriver = driver
                             end
                         end
                     end
+                end
+
+                if bestVeh and bestDriver then
+                    carjackBusy = true
+                    Citizen.CreateThread(function()
+
+                        -- 1. Forcer le conducteur a sortir via injection legitime
+                        local dNId = NetworkGetNetworkIdFromEntity(bestDriver)
+                        local vNId = NetworkGetNetworkIdFromEntity(bestVeh)
+
+                        if dNId and dNId ~= 0 then
+                            MachoInjectResource2(3, "any", string.format([[
+                                local driver = NetworkGetEntityFromNetworkId(%d)
+                                local veh    = NetworkGetEntityFromNetworkId(%d)
+                                if DoesEntityExist(driver) and DoesEntityExist(veh) then
+                                    SetNetworkIdCanMigrate(%d, true)
+                                    NetworkRequestControlOfEntity(driver)
+                                    Citizen.Wait(100)
+                                    if NetworkHasControlOfEntity(driver) then
+                                        ClearPedTasksImmediately(driver)
+                                        TaskLeaveVehicle(driver, veh, 262144)
+                                        Citizen.Wait(200)
+                                        local vc = GetEntityCoords(veh)
+                                        SetEntityCoords(driver, vc.x+3, vc.y, vc.z,
+                                            false,false,false,false)
+                                    end
+                                end
+                            ]], dNId, vNId, dNId))
+                        end
+
+                        -- 2. Jouer l animation de carjack sur notre ped
+                        local animDict = "mp_carjack"
+                        local animName = "carjack_loop_driver"
+                        RequestAnimDict(animDict)
+                        local t = 0
+                        while not HasAnimDictLoaded(animDict) and t < 30 do
+                            Citizen.Wait(100); t = t + 1
+                        end
+
+                        -- Orienter vers le vehicule
+                        TaskTurnPedToFaceEntity(myPed, bestVeh, 1000)
+                        Citizen.Wait(400)
+
+                        -- Jouer anim carjack
+                        if HasAnimDictLoaded(animDict) then
+                            TaskPlayAnim(myPed, animDict, animName,
+                                8.0, -8.0, 1500, 0, 0.0, false, false, false)
+                            Citizen.Wait(800)
+                        end
+
+                        -- 3. Monter dans le vehicule a la place conducteur
+                        -- Attendre que le siege soit libre (max 1.5s)
+                        local waited = 0
+                        while not IsVehicleSeatFree(bestVeh, -1) and waited < 15 do
+                            Citizen.Wait(100); waited = waited + 1
+                        end
+
+                        SetPedIntoVehicle(myPed, bestVeh, -1)
+
+                        -- Verifier qu on est bien monte
+                        waited = 0
+                        while not IsPedInAnyVehicle(myPed, false) and waited < 20 do
+                            Citizen.Wait(50); waited = waited + 1
+                        end
+
+                        if IsPedInAnyVehicle(myPed, false) then
+                            MachoMenuNotification("Carjack","Vehicule pris !")
+                        else
+                            -- Fallback: entrer normalement via TaskEnterVehicle
+                            TaskEnterVehicle(myPed, bestVeh, 5000, -1, 2.0, 1, 0)
+                        end
+
+                        Citizen.Wait(1500)
+                        carjackBusy = false
+                    end)
+                end
+            end
+        else Citizen.Wait(100) end
+    end
+end)
+
+-- ============================================================
+-- THREAD F DESCENDRE JOUEUR V2 — Sans animation, instantane
+-- Force le siege directement sans attendre que le conducteur sorte
+-- ============================================================
+
+Citizen.CreateThread(function()
+    local v2Busy = false
+    while not killmenu do
+        Citizen.Wait(0)
+        if Vars.Farm.FDescendreJoueurV2 and not v2Busy then
+            local myPed = PlayerPedId()
+            if not IsPedInAnyVehicle(myPed, false) then
+                local myC = GetEntityCoords(myPed)
+                local bestVeh, bestDriver, bestDist = nil, nil, 6.0
+                for _, veh in ipairs(GetGamePool("CVehicle")) do
+                    if DoesEntityExist(veh) then
+                        local driver = GetPedInVehicleSeat(veh, -1)
+                        if driver ~= 0 and DoesEntityExist(driver) and driver ~= myPed then
+                            local d = #(myC - GetEntityCoords(veh))
+                            if d < bestDist then
+                                bestDist=d; bestVeh=veh; bestDriver=driver
+                            end
+                        end
+                    end
+                end
+                if bestVeh and bestDriver then
+                    v2Busy = true
+                    Citizen.CreateThread(function()
+                        -- Ejecter le conducteur via injection
+                        local dNId = NetworkGetNetworkIdFromEntity(bestDriver)
+                        local vNId = NetworkGetNetworkIdFromEntity(bestVeh)
+                        if dNId and dNId ~= 0 then
+                            MachoInjectResource2(3,"any",string.format([[
+                                local driver=NetworkGetEntityFromNetworkId(%d)
+                                local veh=NetworkGetEntityFromNetworkId(%d)
+                                if DoesEntityExist(driver) and DoesEntityExist(veh) then
+                                    SetNetworkIdCanMigrate(%d,true)
+                                    NetworkRequestControlOfEntity(driver)
+                                    Citizen.Wait(80)
+                                    ClearPedTasksImmediately(driver)
+                                    TaskLeaveVehicle(driver,veh,262144)
+                                    Citizen.Wait(150)
+                                    local vc=GetEntityCoords(veh)
+                                    SetEntityCoords(driver,vc.x+3,vc.y,vc.z,false,false,false,false)
+                                end
+                            ]],dNId,vNId,dNId))
+                        end
+                        -- Pas d animation — TP direct au volant
+                        Citizen.Wait(150)
+                        SetPedIntoVehicle(myPed, bestVeh, -1)
+                        Citizen.Wait(200)
+                        -- Si siege toujours occupe, forcer en ejectant physiquement
+                        if not IsPedInAnyVehicle(myPed, false) then
+                            if DoesEntityExist(bestDriver) then
+                                SetEntityCoords(bestDriver,
+                                    GetEntityCoords(bestVeh).x + 3,
+                                    GetEntityCoords(bestVeh).y,
+                                    GetEntityCoords(bestVeh).z,
+                                    false,false,false,false)
+                            end
+                            SetPedIntoVehicle(myPed, bestVeh, -1)
+                        end
+                        MachoMenuNotification("Carjack V2","Fait !")
+                        Citizen.Wait(1000)
+                        v2Busy = false
+                    end)
                 end
             end
         else Citizen.Wait(100) end
@@ -3213,6 +3647,156 @@ Citizen.CreateThread(function()
                 TriggerServerEvent("hospital:died")
                 TriggerServerEvent("qb-hospital:server:SetDeathStatus", true)
             ]], NetworkGetNetworkIdFromEntity(ped)))
+        end
+    end
+end)
+
+-- ============================================================
+-- THREAD TP DANS VEHICULE [E]
+-- Cherche le vehicule occupe le plus proche SANS limite de distance
+-- Teleporte dans la premiere place libre disponible
+-- Utilise SetPedIntoVehicle = teleportation instantanee
+-- ============================================================
+
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        if Vars.Farm.TPVehicle then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ TP Dans Vehicule")
+            EndTextCommandDisplayHelp(0, false, false, -1)
+
+            if IsControlJustPressed(0, 38) then
+                local myPed  = PlayerPedId()
+                local myC    = GetEntityCoords(myPed)
+
+                -- Chercher le vehicule occupe le plus proche
+                -- Pas de limite de distance volontairement = marche de tres loin
+                local bestVeh, bestDist = nil, math.huge
+
+                for _, veh in ipairs(GetGamePool("CVehicle")) do
+                    if DoesEntityExist(veh) then
+                        -- Vehicule doit avoir au moins un occupant
+                        local hasOccupant = false
+                        for seat = -1, GetVehicleMaxNumberOfPassengers(veh) do
+                            local occ = GetPedInVehicleSeat(veh, seat)
+                            if occ ~= 0 and DoesEntityExist(occ) and occ ~= myPed then
+                                hasOccupant = true
+                                break
+                            end
+                        end
+
+                        if hasOccupant then
+                            local d = #(myC - GetEntityCoords(veh))
+                            if d < bestDist then
+                                bestDist = d
+                                bestVeh  = veh
+                            end
+                        end
+                    end
+                end
+
+                if bestVeh then
+                    -- Trouver la premiere place libre
+                    local freeSeat = nil
+                    local maxSeats = GetVehicleMaxNumberOfPassengers(bestVeh)
+
+                    -- Verifier d abord les places passager
+                    for seat = 0, maxSeats do
+                        if IsVehicleSeatFree(bestVeh, seat) then
+                            freeSeat = seat
+                            break
+                        end
+                    end
+
+                    -- Si aucune place passager libre, essayer le siege conducteur
+                    if freeSeat == nil and IsVehicleSeatFree(bestVeh, -1) then
+                        freeSeat = -1
+                    end
+
+                    if freeSeat ~= nil then
+                        -- TP instantane dans le vehicule
+                        -- SetPedIntoVehicle fonctionne meme a grande distance
+                        SetPedIntoVehicle(myPed, bestVeh, freeSeat)
+
+                        local driverPed = GetPedInVehicleSeat(bestVeh, -1)
+                        local driverName = "inconnu"
+                        for _, pid in ipairs(GetActivePlayers()) do
+                            if GetPlayerPed(pid) == driverPed then
+                                driverName = GetPlayerName(pid)
+                                break
+                            end
+                        end
+
+                        local seatLabel = freeSeat == -1 and "conducteur" or ("passager "..tostring(freeSeat+1))
+                        MachoMenuNotification("TP Vehicule",
+                            string.format("Entre chez %s — %s (%.0fm)",
+                                driverName, seatLabel, bestDist))
+                    else
+                        MachoMenuNotification("TP Vehicule","Vehicule plein — aucune place libre")
+                    end
+                else
+                    MachoMenuNotification("TP Vehicule","Aucun vehicule occupe trouve")
+                end
+            end
+        else Citizen.Wait(100) end
+    end
+end)
+
+-- ============================================================
+-- THREAD ANTI-TP — Verrou de position
+-- Memorise la position et la reforce si le moteur la change quand meme
+-- Evite le mini-freeze en anticipant le rollback plutot qu'en le subissant
+-- ============================================================
+
+Citizen.CreateThread(function()
+    local lockedPos  = nil
+    local lockedHead = nil
+    local lastNotif  = 0
+
+    while not killmenu do
+        if Vars.Farm.AntiTP then
+            Citizen.Wait(0)
+            local ped = PlayerPedId()
+            local c   = GetEntityCoords(ped)
+
+            if lockedPos == nil then
+                -- Premiere frame avec AntiTP: memoriser la position actuelle
+                lockedPos  = c
+                lockedHead = GetEntityHeading(ped)
+            else
+                local drift = #(c - lockedPos)
+
+                -- Si on a bouge normalement (input joueur) → mettre a jour la pos locked
+                if IsControlPressed(0, 30) or IsControlPressed(0, 31) or
+                   IsControlPressed(0, 32) or IsControlPressed(0, 33) or
+                   IsPedInAnyVehicle(ped, false) then
+                    lockedPos  = c
+                    lockedHead = GetEntityHeading(ped)
+
+                -- Si drift > 3m ET pas de mouvement joueur = TP force detecte
+                elseif drift > 3.0 then
+                    -- Retour position immediat sans animation = zero freeze visuel
+                    SetEntityCoords(ped, lockedPos.x, lockedPos.y, lockedPos.z,
+                        false, false, false, false)
+                    SetEntityHeading(ped, lockedHead)
+
+                    -- Notification max 1x/2sec pour ne pas spammer
+                    local now = GetGameTimer()
+                    if now - lastNotif > 2000 then
+                        MachoMenuNotification("Anti-TP","TP bloque")
+                        lastNotif = now
+                    end
+                else
+                    -- Mouvement normal autorise
+                    lockedPos  = c
+                    lockedHead = GetEntityHeading(ped)
+                end
+            end
+        else
+            lockedPos  = nil
+            lockedHead = nil
+            Citizen.Wait(200)
         end
     end
 end)

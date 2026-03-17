@@ -756,8 +756,7 @@ MB("self","Toggle Noclip","", function()
             local ped   = PlayerPedId()
             local speed = 0.08  -- vitesse de base beaucoup plus basse
 
-            -- Rendre invisible et sans collision
-            SetEntityVisible(ped, false, false)
+            -- Pas d invisibilite — on reste visible
             SetEntityCollision(ped, false, false)
             FreezeEntityPosition(ped, true)
 
@@ -879,7 +878,6 @@ MB("self","Toggle Noclip","", function()
 
             -- Restaurer quand on desactive
             ped = PlayerPedId()
-            SetEntityVisible(ped, true, false)
             SetEntityCollision(ped, true, false)
             FreezeEntityPosition(ped, false)
         end)

@@ -53,6 +53,7 @@ local Vars = {
         curractivetorqueIndex=1, curractiveenignemulrIndex=1,
         vehenginemultiplier={"x2","x4","x8","x16","x32","x64","x128","x256","x512","x1024"},
         AutoPilot={CruiseSpeed=50.0, DrivingStyle=6},
+        GhostV2=false, LockJoueurVeh=false, EjectPassager=false,
     },
     Farm = {
         Carjack=false, CarjackDist=false, CarjackDistV2=false,
@@ -60,6 +61,28 @@ local Vars = {
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false, FDescendreJoueurV2=false,
         AntiTP=false, KickVehicule=false, EjectTP=false, PedSpam=false, FakeDeath=false, TPVehicle=false,
+        CageJoueur=false, StunLoop=false, StunTarget=nil,
+        AttachJoueur=false, AttachTarget=nil,
+        FakeLag=false, FakeLagTarget=nil,
+        ChangeName=false, CurrentFakeName="",
+    },
+    Troll = {
+        FreezeCamJoueur=false, FreezeCamTarget=nil,
+        BlackScreenJoueur=false, BlackScreenTarget=nil,
+        InfiniteWantedJoueur=false, InfiniteWantedTarget=nil,
+        CloneJoueur=false,
+        FakeAdmin=false, FakeAdminName="[ADMIN] ZeyMenu",
+    },
+    Stealth = {
+        SpoofServerId=false, FakeSpoofId=999,
+        FakePlayerCount=false, FakeCount=1,
+        HideFromBlip=false,
+        StealthNetwork=false,
+        AntiFakePing=false,
+        AutoRevive=false,
+        BubbleShield=false,
+        AntiRagdoll=false,
+        FakePing=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -69,6 +92,7 @@ local Vars = {
         BulletEnabled=false, BulletIndex=1,
         Bullets={"WEAPON_REVOLVER","WEAPON_HEAVYSNIPER","WEAPON_RPG","WEAPON_FIREWORK","WEAPON_RAYPISTOL"},
         BulletNames={"Revolver","Heavy Sniper","RPG","Firework","Ray Pistol"},
+        NoBulletDrop=false, SilentAim=false, BulletSpeedBoost=false,
         AimBot={
             Enabled=false, Bone="SKEL_HEAD", BoneIndex=1,
             ThroughWalls=false, DrawFOV=true, ShowTarget=false,
@@ -147,9 +171,21 @@ end
 -- ============================================================
 
 -- [CACHER] GetPlayerName
+-- [GET_PLAYER_NAME] Hook unique — ChangeName / FakeAdmin / SafeMode
 MachoHookNative(0x6D0DE6A7B5DA71F8, function(player_id)
     if player_id == PlayerId() then
-        return false, "Player_"..tostring(GetPlayerServerId(player_id))
+        -- Priorite 1: Change Name actif
+        if Vars.Farm.ChangeName and Vars.Farm.CurrentFakeName ~= "" then
+            return false, Vars.Farm.CurrentFakeName
+        end
+        -- Priorite 2: Fake Admin actif
+        if Vars.Troll and Vars.Troll.FakeAdmin then
+            return false, Vars.Troll.FakeAdminName
+        end
+        -- Priorite 3: SafeMode
+        if SafeMode then
+            return false, "Player_"..tostring(math.random(1000,9999))
+        end
     end
     return true
 end)
@@ -196,14 +232,26 @@ MachoHookNative(0xFDEBD59D3C09C26C, function(resourceName)
 end)
 
 -- [ANTI-TP] SET_ENTITY_COORDS
--- On sauvegarde la position et on la force en retour = zero freeze
 MachoHookNative(0x06843DA7060A026B, function(entity, x, y, z)
-    if Vars.Farm.AntiTP and entity == PlayerPedId() then
-        local c = GetEntityCoords(entity)
-        if #(c - vector3(x,y,z)) > 5.0 then
-            -- Retourner immediatement sans laisser le moteur traiter
-            -- On ne fait PAS de notification ici pour eviter tout lag
-            return false
+    if entity == PlayerPedId() then
+        -- Bloquer si AntiTP actif OU si noclip actif (eviter rollback AC)
+        if Vars.Farm.AntiTP or noclipping then
+            -- Autoriser nos propres TPs volontaires du menu (< 5000m = on laisse)
+            -- Bloquer uniquement les TPs externes suspects (> 5m)
+            if not noclipping then
+                local c = GetEntityCoords(entity)
+                if #(c - vector3(x,y,z)) > 5.0 then return false end
+            else
+                -- En noclip: bloquer TOUT ce qui vient de l exterieur
+                -- On detecte si c est notre propre noclip qui appelle cette native
+                -- Le noclip du menu fait des petits deplacements (<2m par frame)
+                local c = GetEntityCoords(entity)
+                local dist = #(c - vector3(x,y,z))
+                if dist > 2.0 then
+                    -- Deplacement > 2m = vient du serveur/AC, pas du noclip
+                    return false
+                end
+            end
         end
     end
     return true
@@ -211,16 +259,23 @@ end)
 
 -- [ANTI-TP] SET_ENTITY_COORDS_NO_OFFSET
 MachoHookNative(0x239A3351AC1DA385, function(entity, x, y, z)
-    if Vars.Farm.AntiTP and entity == PlayerPedId() then
-        local c = GetEntityCoords(entity)
-        if #(c - vector3(x,y,z)) > 5.0 then return false end
+    if entity == PlayerPedId() then
+        if Vars.Farm.AntiTP or noclipping then
+            local c = GetEntityCoords(entity)
+            local dist = #(c - vector3(x,y,z))
+            if noclipping then
+                if dist > 2.0 then return false end
+            else
+                if dist > 5.0 then return false end
+            end
+        end
     end
     return true
 end)
 
 -- [ANTI-TP] TASK_GO_TO_COORD_ANY_MEANS
 MachoHookNative(0x5BC448CB78FA3E88, function(ped)
-    if Vars.Farm.AntiTP and ped == PlayerPedId() then
+    if (Vars.Farm.AntiTP or noclipping) and ped == PlayerPedId() then
         return false
     end
     return true
@@ -228,7 +283,7 @@ end)
 
 -- [ANTI-TP] FREEZE_ENTITY_POSITION externe
 MachoHookNative(0x428CA6DBD1094446, function(entity, toggle)
-    if Vars.Farm.AntiTP and entity == PlayerPedId() and toggle == true then
+    if (Vars.Farm.AntiTP or noclipping) and entity == PlayerPedId() and toggle == true then
         return false
     end
     return true
@@ -236,9 +291,9 @@ end)
 
 -- [ANTI-TP] SET_PED_COORDS_KEEP_VEHICLE
 MachoHookNative(0x9AFEFF481A85AB2E, function(ped, x, y, z)
-    if Vars.Farm.AntiTP and ped == PlayerPedId() then
+    if (Vars.Farm.AntiTP or noclipping) and ped == PlayerPedId() then
         local c = GetEntityCoords(ped)
-        if #(c - vector3(x,y,z)) > 5.0 then return false end
+        if #(c - vector3(x,y,z)) > 2.0 then return false end
     end
     return true
 end)
@@ -437,9 +492,250 @@ MC("new","TP Dans Vehicule [E]",Vars.Farm,"TPVehicle",
         Vars.Farm.TPVehicle = false
         MachoMenuNotification("TP Vehicule","Desactive")
     end)
+MC("new","Cage Joueur [E]",Vars.Farm,"CageJoueur",
+    function()
+        Vars.Farm.CageJoueur=true
+        MachoMenuNotification("Cage","E pour cager le joueur le plus proche")
+    end,
+    function()
+        Vars.Farm.CageJoueur=false
+        MachoMenuNotification("Cage","Desactive")
+    end)
+MC("new","Stun Loop [E]",Vars.Farm,"StunLoop",
+    function()
+        Vars.Farm.StunLoop=true
+        MachoMenuNotification("Stun Loop","E pour stunner le joueur le plus proche")
+    end,
+    function()
+        Vars.Farm.StunLoop=false
+        Vars.Farm.StunTarget=nil
+        MachoMenuNotification("Stun Loop","Desactive")
+    end)
+MC("new","Attach Joueur [E]",Vars.Farm,"AttachJoueur",
+    function()
+        Vars.Farm.AttachJoueur=true
+        MachoMenuNotification("Attach","E pour attacher le joueur le plus proche a toi")
+    end,
+    function()
+        Vars.Farm.AttachJoueur=false
+        Vars.Farm.AttachTarget=nil
+        MachoMenuNotification("Attach","Desactive")
+    end)
+MC("new","Fake Lag [E]",Vars.Farm,"FakeLag",
+    function()
+        Vars.Farm.FakeLag=true
+        MachoMenuNotification("Fake Lag","E pour lagger le joueur le plus proche")
+    end,
+    function()
+        Vars.Farm.FakeLag=false
+        Vars.Farm.FakeLagTarget=nil
+        MachoMenuNotification("Fake Lag","Desactive")
+    end)
 
--- FARM
-CreateMenu("farm", "Farm", "main")
+-- TROLL submenu
+MS("new","Troll Options","Cam / Blackscreen / Wanted","troll")
+CreateMenu("troll","Troll Options","new")
+MC("troll","Freeze Cam Joueur [E]",Vars.Troll,"FreezeCamJoueur",
+    function()
+        Vars.Troll.FreezeCamJoueur=true
+        MachoMenuNotification("Freeze Cam","E pour bloquer la camera du joueur le plus proche")
+    end,
+    function()
+        Vars.Troll.FreezeCamJoueur=false
+        Vars.Troll.FreezeCamTarget=nil
+    end)
+MC("troll","Blackscreen Joueur [E]",Vars.Troll,"BlackScreenJoueur",
+    function()
+        Vars.Troll.BlackScreenJoueur=true
+        MachoMenuNotification("Blackscreen","E pour blackscreen le joueur le plus proche")
+    end,
+    function()
+        Vars.Troll.BlackScreenJoueur=false
+        Vars.Troll.BlackScreenTarget=nil
+    end)
+MC("troll","Infinite Wanted Joueur [E]",Vars.Troll,"InfiniteWantedJoueur",
+    function()
+        Vars.Troll.InfiniteWantedJoueur=true
+        MachoMenuNotification("Wanted Loop","E pour mettre le joueur le plus proche en wanted 5 en boucle")
+    end,
+    function()
+        Vars.Troll.InfiniteWantedJoueur=false
+        Vars.Troll.InfiniteWantedTarget=nil
+    end)
+MB("troll","Clone Joueur [E]","Copier le ped du joueur le plus proche", function()
+    local myPed = PlayerPedId()
+    local myC   = GetEntityCoords(myPed)
+    local best, bestDist = nil, 50.0
+    for _,pid in ipairs(GetActivePlayers()) do
+        if pid~=PlayerId() then
+            local tp=GetPlayerPed(pid)
+            if DoesEntityExist(tp) then
+                local d=#(myC-GetEntityCoords(tp))
+                if d<bestDist then bestDist=d; best=tp end
+            end
+        end
+    end
+    if best then
+        local model=GetEntityModel(best)
+        RequestModel(model)
+        local t=0
+        while not HasModelLoaded(model) and t<30 do Citizen.Wait(100);t=t+1 end
+        SetPlayerModel(PlayerId(),model)
+        SetPedDefaultComponentVariation(myPed)
+        -- Copier les composants vestimentaires
+        for comp=0,11 do
+            local drawable=GetPedDrawableVariation(best,comp)
+            local texture=GetPedTextureVariation(best,comp)
+            SetPedComponentVariation(myPed,comp,drawable,texture,0)
+        end
+        MachoMenuNotification("Clone","Ped copie !")
+    else
+        MachoMenuNotification("Clone","Aucun joueur dans 50m")
+    end
+end)
+MC("troll","Fake Admin Name",Vars.Troll,"FakeAdmin",
+    function()
+        Vars.Troll.FakeAdmin=true
+        MachoMenuNotification("Fake Admin","Ton nom apparait comme: "..Vars.Troll.FakeAdminName)
+    end,
+    function()
+        Vars.Troll.FakeAdmin=false
+        MachoMenuNotification("Fake Admin","Desactive")
+    end)
+
+-- STEALTH submenu
+MS("new","Stealth Options","Spoof / Blip / Network","stealth")
+CreateMenu("stealth","Stealth Options","new")
+MC("stealth","Spoof Server ID",Vars.Stealth,"SpoofServerId",
+    function()
+        Vars.Stealth.SpoofServerId=true
+        MachoMenuNotification("Spoof ID","Ton server ID est masque aux scanners")
+    end,
+    function() Vars.Stealth.SpoofServerId=false end)
+MC("stealth","Fake Player Count",Vars.Stealth,"FakePlayerCount",
+    function()
+        Vars.Stealth.FakePlayerCount=true
+        MachoMenuNotification("Fake Count","Serveur voit 1 joueur dans ta session")
+    end,
+    function() Vars.Stealth.FakePlayerCount=false end)
+MC("stealth","Hide From Blip",Vars.Stealth,"HideFromBlip",
+    function()
+        Vars.Stealth.HideFromBlip=true
+        MachoMenuNotification("Hide Blip","Ton blip supprime pour les autres")
+    end,
+    function()
+        Vars.Stealth.HideFromBlip=false
+    end)
+MC("stealth","Stealth Network",Vars.Stealth,"StealthNetwork",
+    function()
+        Vars.Stealth.StealthNetwork=true
+        MachoMenuNotification("Stealth Net","Actions reseau masquees")
+    end,
+    function() Vars.Stealth.StealthNetwork=false end)
+MC("stealth","Auto Revive",Vars.Stealth,"AutoRevive",
+    function()
+        Vars.Stealth.AutoRevive=true
+        MachoMenuNotification("Auto Revive","Reanimation automatique a la mort")
+    end,
+    function() Vars.Stealth.AutoRevive=false end)
+MC("stealth","Bubble Shield",Vars.Stealth,"BubbleShield",
+    function()
+        Vars.Stealth.BubbleShield=true
+        MachoMenuNotification("Bubble Shield","Personne ne peut te toucher physiquement")
+    end,
+    function() Vars.Stealth.BubbleShield=false end)
+MC("stealth","Anti Ragdoll Permanent",Vars.Stealth,"AntiRagdoll",
+    function()
+        Vars.Stealth.AntiRagdoll=true
+        MachoMenuNotification("Anti Ragdoll","Hook actif — aucun ragdoll force possible")
+    end,
+    function() Vars.Stealth.AntiRagdoll=false end)
+MC("stealth","Fake Ping",Vars.Stealth,"FakePing",
+    function()
+        Vars.Stealth.FakePing=true
+        MachoMenuNotification("Fake Ping","Ton ping apparait normal aux scanners")
+    end,
+    function() Vars.Stealth.FakePing=false end)
+MB("stealth","Force Respawn","Se reaninier immediatement via native", function()
+    local myPed = PlayerPedId()
+    local c = GetEntityCoords(myPed)
+    local h = GetEntityHeading(myPed)
+    -- NetworkResurrectLocalPlayer bypass le systeme jobsbuilder
+    -- fonctionne au niveau du moteur natif directement
+    NetworkResurrectLocalPlayer(c.x, c.y, c.z, h, true, false)
+    SetEntityHealth(myPed, 200)
+    SetPlayerInvincible(PlayerId(), false)
+    ClearPedBloodDamage(myPed)
+    ClearPedWetness(myPed)
+    MachoMenuNotification("Force Respawn","Resurrection native forcee !")
+end)
+
+-- LISTE 100 PSEUDOS — jamais le meme deux fois de suite
+local _changeNameList = {
+    "Shadow_X","NightWolf","BladeRunner","GhostRider","IronFist",
+    "StormBreaker","DarkMatter","VoidWalker","PhantomX","CrimsonEdge",
+    "NeonHunter","SilverFang","ThunderClap","ArcaneBlaze","FrostByte",
+    "ViperStrike","CobaltRush","EmberFall","ObsidianKnight","QuickSilver",
+    "RavenClaw","SteelGhost","TitanFall","UrbanLegend","VenomStrike",
+    "WarpSpeed","XenoBlade","YellowJacket","ZeroPoint","AlphaDawn",
+    "BetaWave","ChaosAgent","DeathBlow","EchoStar","FalconEye",
+    "GrimReaper","HyperDrive","InfernoX","JadeViper","KineticX",
+    "LunarEclipse","MidnightRaider","NovaBurst","OmegaForce","PlasmaCut",
+    "QuantumLeap","RedPhantom","SolarFlare","ToxicRain","UltraViolet",
+    "VortexX","WhiteNoise","XanderX","YetiBear","ZephyrWind",
+    "AcidRain","BlackMamba","CyberPunk","DragonFire","ElectricEel",
+    "FlameHawk","GlitchX","HellFire","IceBreaker","JungleCat",
+    "KryptoX","LightningX","MindBender","NanoBot","OverDrive",
+    "PixelKnight","QuartzX","RogueWave","ShadowBlade","TurboX",
+    "UnderWorld","VenomX","WildCard","XenomorphX","YoloKing",
+    "ZombieX","AtomBomb","BattleCry","ColdBlood","DoomBringer",
+    "EdgeLord","FrostKing","GhostFace","HardCore","IronWill",
+    "JinxX","KillerBee","LoneWolf","MadMax","NightCrawler",
+    "OverkillX","PanicX","QuickDraw","RealDeal","StrikeFast",
+}
+local _usedNames = {}
+
+local function _getRandomName()
+    -- Si tous utilises, reset
+    if #_usedNames >= #_changeNameList then
+        _usedNames = {}
+    end
+    local available = {}
+    for _, n in ipairs(_changeNameList) do
+        local used = false
+        for _, u in ipairs(_usedNames) do
+            if u == n then used=true; break end
+        end
+        if not used then table.insert(available, n) end
+    end
+    local pick = available[math.random(1, #available)]
+    table.insert(_usedNames, pick)
+    -- Ne jamais reprendre le precedent
+    if pick == Vars.Farm.CurrentFakeName then
+        return _getRandomName()
+    end
+    return pick
+end
+
+MC("new","Change Name",Vars.Farm,"ChangeName",
+    function()
+        Vars.Farm.ChangeName = true
+        Vars.Farm.CurrentFakeName = _getRandomName()
+        MachoMenuNotification("Change Name","Nom: "..Vars.Farm.CurrentFakeName)
+    end,
+    function()
+        Vars.Farm.ChangeName = false
+        Vars.Farm.CurrentFakeName = ""
+        MachoMenuNotification("Change Name","Desactive — vrai nom restaure")
+    end)
+MB("new","Change Name — Changer","Nouveau pseudo aleatoire", function()
+    if Vars.Farm.ChangeName then
+        Vars.Farm.CurrentFakeName = _getRandomName()
+        MachoMenuNotification("Change Name","Nouveau nom: "..Vars.Farm.CurrentFakeName)
+    else
+        MachoMenuNotification("Change Name","Active Change Name d abord")
+    end
+end)
 MC("farm","Carjack",Vars.Farm,"Carjack",
     function() Vars.Farm.Carjack=true end,
     function() Vars.Farm.Carjack=false end)
@@ -748,140 +1044,9 @@ MC("self","Thermal Vision","",nil,
 MC("self","Night Vision","",nil,
     function() SetNightvision(true) end,
     function() SetNightvision(false) end)
-MB("self","Toggle Noclip","", function()
+MB("self","Toggle Noclip [F9]","", function()
     noclipping = not noclipping
-    MachoMenuNotification("Noclip", noclipping and "Active" or "Desactive")
-    if noclipping then
-        Citizen.CreateThread(function()
-            local ped   = PlayerPedId()
-            local speed = 0.08  -- vitesse de base beaucoup plus basse
-
-            -- Pas d invisibilite — on reste visible
-            SetEntityCollision(ped, false, false)
-            FreezeEntityPosition(ped, true)
-
-            while noclipping do
-                Citizen.Wait(0)
-                ped = PlayerPedId()
-
-                -- Bloquer tous les controles du joueur sauf ceux qu on gere
-                DisableAllControlActions(0)
-                -- Garder ESC et les touches menu
-                EnableControlAction(0, 199, true) -- ESC
-                EnableControlAction(0, 200, true) -- Return
-                EnableControlAction(0, 249, true) -- Push to talk
-
-                -- Lire la direction de la camera (pas du perso)
-                -- GetGameplayCamRot retourne pitch/roll/yaw en degres
-                local camRot = GetGameplayCamRot(2)
-                local camFwd = GetGameplayCamForwardVector()
-
-                -- Vecteur avant: direction ou regarde la cam (ignore le pitch pour ZQSD)
-                -- On projette sur le plan horizontal pour Z/S
-                local fwdH = vector3(camFwd.x, camFwd.y, 0.0)
-                local fwdHLen = math.sqrt(fwdH.x*fwdH.x + fwdH.y*fwdH.y)
-                if fwdHLen > 0.001 then
-                    fwdH = vector3(fwdH.x/fwdHLen, fwdH.y/fwdHLen, 0.0)
-                end
-
-                -- Vecteur droite: perpendiculaire au vecteur avant
-                local right = vector3(fwdH.y, -fwdH.x, 0.0)
-
-                -- Vecteur haut: toujours Z pur
-                local up = vector3(0.0, 0.0, 1.0)
-
-                -- Molette = ajuster la vitesse de base
-                -- Scroll up = plus vite, Scroll down = plus lent
-                if IsDisabledControlJustPressed(0, 15) then  -- molette haut
-                    speed = math.min(speed * 1.35, 5.0)
-                end
-                if IsDisabledControlJustPressed(0, 14) then  -- molette bas
-                    speed = math.max(speed / 1.35, 0.01)
-                end
-
-                -- Vitesse adaptative: Shift = rapide, Ctrl = lent
-                local curSpeed = speed
-                if IsDisabledControlPressed(0, 21) then  -- Shift
-                    curSpeed = speed * 4.0
-                elseif IsDisabledControlPressed(0, 36) then  -- Ctrl
-                    curSpeed = speed * 0.25
-                end
-
-                -- Calculer le mouvement depuis les touches ZQSD
-                local move = vector3(0.0, 0.0, 0.0)
-
-                -- Z = avant (dans la direction de la cam, axe horizontal)
-                if IsDisabledControlPressed(0, 32) then  -- W/Z
-                    move = vector3(move.x + fwdH.x, move.y + fwdH.y, move.z)
-                end
-                -- S = arriere
-                if IsDisabledControlPressed(0, 33) then  -- S
-                    move = vector3(move.x - fwdH.x, move.y - fwdH.y, move.z)
-                end
-                -- Q = gauche
-                if IsDisabledControlPressed(0, 34) then  -- A/Q
-                    move = vector3(move.x - right.x, move.y - right.y, move.z)
-                end
-                -- D = droite
-                if IsDisabledControlPressed(0, 35) then  -- D
-                    move = vector3(move.x + right.x, move.y + right.y, move.z)
-                end
-                -- Espace = monter
-                if IsDisabledControlPressed(0, 22) then  -- Space
-                    move = vector3(move.x, move.y, move.z + 1.0)
-                end
-                -- Ctrl = descendre (double usage avec slow)
-                if IsDisabledControlPressed(0, 36) and not IsDisabledControlPressed(0, 21) then
-                    move = vector3(move.x, move.y, move.z - 1.0)
-                end
-
-                -- Si on appuie sur avant/arriere ET qu on regarde vers le haut/bas
-                -- inclure la composante verticale de la cam (regarder en l air = monter)
-                if IsDisabledControlPressed(0, 32) then
-                    move = vector3(move.x, move.y, move.z + camFwd.z)
-                end
-                if IsDisabledControlPressed(0, 33) then
-                    move = vector3(move.x, move.y, move.z - camFwd.z)
-                end
-
-                -- Normaliser si deplacement diagonal
-                local moveLen = math.sqrt(move.x*move.x + move.y*move.y + move.z*move.z)
-                if moveLen > 0.001 then
-                    move = vector3(
-                        (move.x/moveLen) * curSpeed,
-                        (move.y/moveLen) * curSpeed,
-                        (move.z/moveLen) * curSpeed
-                    )
-                end
-
-                -- Afficher la vitesse actuelle en bas de l ecran
-                SetTextFont(0)
-                SetTextScale(0.3, 0.3)
-                SetTextColour(255, 255, 255, 180)
-                BeginTextCommandDisplayText("STRING")
-                AddTextComponentSubstringPlayerName(
-                    string.format("Noclip  vitesse: %.2f  [molette +/-]  [Shift x4]  [Ctrl x0.25]", speed)
-                )
-                EndTextCommandDisplayText(0.5, 0.96)
-
-                -- Appliquer la position
-                local pos = GetEntityCoords(ped)
-                local newPos = vector3(pos.x + move.x, pos.y + move.y, pos.z + move.z)
-
-                SetEntityCoords(ped, newPos.x, newPos.y, newPos.z,
-                    false, false, false, false)
-
-                -- Le perso ne bouge pas visuellement — heading fixe
-                -- (pas de SetEntityHeading = il garde son orientation d origine)
-
-            end
-
-            -- Restaurer quand on desactive
-            ped = PlayerPedId()
-            SetEntityCollision(ped, true, false)
-            FreezeEntityPosition(ped, false)
-        end)
-    end
+    MachoMenuNotification("Noclip", noclipping and "Active — F9 pour desactiver" or "Desactive")
 end)
 MB("self","Refill Health","", function() SetEntityHealth(PlayerPedId(),200) end)
 MB("self","Refill Armour","", function() SetPedArmour(PlayerPedId(),100) end)
@@ -982,6 +1147,31 @@ MC("vehicle","ZeyMenu Plate",Vars.Vehicle,"ZeyMenuplate",
 MC("vehicle","Vehicle Snatcher","",nil,
     function() VehicleSnatcher=true end,
     function() VehicleSnatcher=false end)
+MC("vehicle","Vehicule Fantome V2",Vars.Vehicle,"GhostV2",
+    function()
+        Vars.Vehicle.GhostV2=true
+        MachoMenuNotification("Ghost V2","Invisible ET sans collision")
+    end,
+    function()
+        Vars.Vehicle.GhostV2=false
+        local v=GetVehiclePedIsIn(PlayerPedId(),false)
+        if v~=0 then
+            SetEntityCollision(v,true,false)
+            SetEntityVisible(v,true,false)
+        end
+    end)
+MC("vehicle","Lock Vehicule Joueur [E]",Vars.Vehicle,"LockJoueurVeh",
+    function()
+        Vars.Vehicle.LockJoueurVeh=true
+        MachoMenuNotification("Lock Veh","E pour verrouiller le vehicule du joueur le plus proche")
+    end,
+    function() Vars.Vehicle.LockJoueurVeh=false end)
+MC("vehicle","Eject Passager Silencieux [E]",Vars.Vehicle,"EjectPassager",
+    function()
+        Vars.Vehicle.EjectPassager=true
+        MachoMenuNotification("Eject Passager","E pour ejecter les passagers silencieusement")
+    end,
+    function() Vars.Vehicle.EjectPassager=false end)
 
 CreateMenu("spawnveh","Spawn Vehicles","vehicle")
 MC("spawnveh","Spawn Inside","",nil,
@@ -1270,6 +1460,24 @@ MC("weapon","Ragebot",Vars.Weapon,"RageBot",
 MC("weapon","One Shot",Vars.Weapon,"OneShot",
     function() Vars.Weapon.OneShot=true end,
     function() Vars.Weapon.OneShot=false end)
+MC("weapon","No Bullet Drop",Vars.Weapon,"NoBulletDrop",
+    function()
+        Vars.Weapon.NoBulletDrop=true
+        MachoMenuNotification("No Bullet Drop","Balles en ligne droite parfaite")
+    end,
+    function() Vars.Weapon.NoBulletDrop=false end)
+MC("weapon","Silent Aim",Vars.Weapon,"SilentAim",
+    function()
+        Vars.Weapon.SilentAim=true
+        MachoMenuNotification("Silent Aim","Actif — balles vers la cible sans que la cam bouge")
+    end,
+    function() Vars.Weapon.SilentAim=false end)
+MC("weapon","Bullet Speed x10",Vars.Weapon,"BulletSpeedBoost",
+    function()
+        Vars.Weapon.BulletSpeedBoost=true
+        MachoMenuNotification("Bullet Speed","Velocite balles x10")
+    end,
+    function() Vars.Weapon.BulletSpeedBoost=false end)
 
 CreateMenu("aimbot","Aimbot","weapon")
 MC("aimbot","Aimbot",Vars.Weapon.AimBot,"Enabled",
@@ -1394,7 +1602,6 @@ MC("anticheat","Guardian Full Bypass",Vars.AntiCheat,"GuardianBypass",
             }
             local _oRNE = RegisterNetEvent
             RegisterNetEvent = function(name, ...)
-                -- Laisser passer normalement mais on wrape le handler
                 return _oRNE(name, ...)
             end
             -- Hook AddEventHandler pour intercepter les callbacks Guardian
@@ -1403,12 +1610,22 @@ MC("anticheat","Guardian Full Bypass",Vars.AntiCheat,"GuardianBypass",
             AddEventHandler = function(name, cb)
                 if name then
                     -- Bloquer les handlers .verify .getEvents .getServerEvents
-                    -- que Guardian enregistre pour chaque resource (events.lua L31-38)
+                    -- que Guardian enregistre pour chaque resource
+                    -- Nouveau nom: onClientResourceStart (mis a jour v2)
                     if string.find(tostring(name), "%.verify$") or
                        string.find(tostring(name), "%.getEvents$") or
                        string.find(tostring(name), "%.getServerEvents$") then
-                        -- Wrapper: ne pas reporter au serveur
                         return _oAEH(name, function(...) end)
+                    end
+                    -- Bloquer aussi onClientResourceStart/Stop de Guardian
+                    if name == "onClientResourceStart" or
+                       name == "onClientResourceStop" or
+                       name == "clientResourceStart" or
+                       name == "clientResourceStop" then
+                        -- Wrapper: laisser passer mais neutraliser les enregistrements suspects
+                        return _oAEH(name, function(resourceName)
+                            -- Ne pas enregistrer les blacklist patterns de Guardian
+                        end)
                     end
                 end
                 return _oAEH(name, cb)
@@ -1887,6 +2104,13 @@ end
 -- Input via MachoOnKeyDown (Virtual-Key codes)
 -- VK_DELETE=0x2E, UP=0x26, DOWN=0x28, RETURN=0x0D, BACK=0x08
 MachoOnKeyDown(function(vk)
+    -- F9 (0x78): toggle noclip — fonctionne menu ouvert ou ferme
+    if vk == 0x78 then
+        noclipping = not noclipping
+        MachoMenuNotification("Noclip", noclipping and "Active" or "Desactive")
+        return
+    end
+
     -- DELETE: toggle menu
     if vk == 0x2E then
         Menu.open = not Menu.open
@@ -1989,15 +2213,15 @@ end)
 
 -- [ANTI-TP] Hook NETWORK_RESURRECT_LOCAL_PLAYER
 MachoHookNative(0x2959F695A6D1A7E5, function(x, y, z)
-    if Vars.Farm.AntiTP then
+    if Vars.Farm.AntiTP or noclipping then
         local c = GetEntityCoords(PlayerPedId())
         if #(c - vector3(x,y,z)) > 5.0 then
-            MachoMenuNotification("Anti-TP","Resurrect bloque")
+            if Vars.Farm.AntiTP then
+                MachoMenuNotification("Anti-TP","Resurrect bloque")
+            end
             return false
         end
     end
-    -- Si FakeDeath actif: bloquer le resurrect automatique du serveur
-    -- (sinon le serveur nous ressuscite tout de suite apres nous avoir "vu" morts)
     if Vars.Farm.FakeDeath then
         return false
     end
@@ -2622,8 +2846,584 @@ MachoInjectResource2(3, "any", [[
 -- (deja gere dans le hook 0x3FEF770D40960D5A ci-dessus)
 
 -- ============================================================
--- INJECTION MACHO — SOLO SESSION bypass via resource legitime
+-- HOOKS MACHO — NOUVELLES FEATURES
 -- ============================================================
+
+-- [ANTI RAGDOLL] SET_PED_TO_RAGDOLL — bloquer ragdoll force externe
+MachoHookNative(0xAE99FB955581844A, function(ped, time1, time2, ragdollType, p4, p5, p6)
+    if Vars.Stealth.AntiRagdoll and ped == PlayerPedId() then
+        return false
+    end
+    return true
+end)
+
+-- [ANTI RAGDOLL] SET_PED_TO_RAGDOLL_WITH_FALL
+MachoHookNative(0xD76632D99E4966C8, function(ped)
+    if Vars.Stealth.AntiRagdoll and ped == PlayerPedId() then
+        return false
+    end
+    return true
+end)
+
+-- [SPOOF SERVER ID] GET_PLAYER_SERVER_ID — retourner faux ID aux scanners
+MachoHookNative(0x9873E404C4AE0F71, function(player)
+    if Vars.Stealth.SpoofServerId and player == PlayerId() then
+        return false, Vars.Stealth.FakeSpoofId
+    end
+    return true
+end)
+
+-- [FAKE PLAYER COUNT] GET_NUMBER_OF_PLAYERS
+MachoHookNative(0x407C7F91DDB46C16, function()
+    if Vars.Stealth.FakePlayerCount then
+        return false, Vars.Stealth.FakeCount
+    end
+    if Vars.Farm.SoloSession then
+        return false, 1
+    end
+    return true
+end)
+
+-- [HIDE BLIP] Masquer notre blip de la map
+-- GET_ENTITY_COORDS pour notre ped — retourner coords loin si quelqu un lit notre blip
+-- Note: le blip est supprime via une injection dans le thread ci-dessous
+
+-- [STEALTH NETWORK] Masquer actions reseau
+-- NETWORK_IS_PLAYER_ACTIVE — masquer notre activite reseau
+MachoHookNative(0xB8DFD30D6973E135, function(player)
+    if Vars.Stealth.StealthNetwork and player == PlayerId() then
+        return false, false
+    end
+    return true
+end)
+
+-- [FAKE PING] GET_PLAYER_WANTED_LEVEL / ping natif
+-- Hash: 0x736C5E88 = GET_PLAYER_WANTED_LEVEL_THRESHOLD (utilise par AC pour ping)
+-- Le vrai ping est lu via NetworkGetAverageLatency (0x5E5B6F39)
+MachoHookNative(0x5E5B6F39B9D5F109, function(player)
+    if Vars.Stealth.FakePing and player == PlayerId() then
+        return false, 45  -- ping normal de 45ms retourne aux scanners
+    end
+    return true
+end)
+-- Hook secondaire NETWORK_GET_AVERAGE_LATENCY
+MachoHookNative(0x70B826B0949873A3, function(player)
+    if Vars.Stealth.FakePing and player == PlayerId() then
+        return false, 45
+    end
+    return true
+end)
+
+-- [FAKE ADMIN] GET_PLAYER_NAME — gere dans le hook unique ci-dessus
+
+-- [NO BULLET DROP] MODIFY_BULLET_SHOOT_PARAMS — gravite des projectiles
+MachoHookNative(0xE5027A4D0CAFF420, function(weaponHash, bulletHash)
+    if Vars.Weapon.NoBulletDrop then
+        -- Retourner parametres sans gravite
+        return true  -- laisser passer mais le thread gere la gravite
+    end
+    return true
+end)
+
+-- [BULLET SPEED] Hook sur la velocite des projectiles
+MachoHookNative(0x1EDD2E27A89A4488, function(weaponHash, speed)
+    if Vars.Weapon.BulletSpeedBoost then
+        return false, speed * 10.0
+    end
+    return true
+end)
+
+-- ============================================================
+-- THREAD — NOUVELLES FEATURES STEALTH
+-- ============================================================
+
+-- Thread Hide Blip + Bubble Shield + Auto Revive + Ghost V2
+Citizen.CreateThread(function()
+    local blipHandle = nil
+    local lastHideBlip = false
+
+    while not killmenu do
+        Citizen.Wait(0)
+        local myPed = PlayerPedId()
+
+        -- HIDE FROM BLIP
+        if Vars.Stealth.HideFromBlip then
+            if not lastHideBlip then
+                -- Supprimer notre blip de la minimap
+                -- Injection dans resource legitime pour ne pas etre detectable
+                MachoInjectResource2(3, "any", [[
+                    local myBlip = GetMainPlayerIndex()
+                    local blip = GetBlipFromEntity(PlayerPedId())
+                    if DoesBlipExist(blip) then
+                        SetBlipAlpha(blip, 0)
+                        SetBlipDisplay(blip, 0)
+                    end
+                    -- Supprimer le blip de joueur sur la map pour les autres
+                    SetEntityVisible(PlayerPedId(), true, true)
+                    local playerBlip = AddBlipForEntity(PlayerPedId())
+                    SetBlipAlpha(playerBlip, 0)
+                    SetBlipDisplay(playerBlip, 0)
+                ]])
+                lastHideBlip = true
+            end
+            local blip = GetBlipFromEntity(myPed)
+            if DoesBlipExist(blip) then
+                SetBlipAlpha(blip, 0)
+                SetBlipDisplay(blip, 0)
+            end
+        else
+            if lastHideBlip then
+                local blip = GetBlipFromEntity(myPed)
+                if DoesBlipExist(blip) then
+                    SetBlipAlpha(blip, 255)
+                    SetBlipDisplay(blip, 2)
+                end
+                lastHideBlip = false
+            end
+            Citizen.Wait(500)
+        end
+    end
+end)
+
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        local myPed = PlayerPedId()
+
+        -- BUBBLE SHIELD — personne ne peut te toucher
+        if Vars.Stealth.BubbleShield then
+            for _, pid in ipairs(GetActivePlayers()) do
+                if pid ~= PlayerId() then
+                    local tp = GetPlayerPed(pid)
+                    if DoesEntityExist(tp) then
+                        SetEntityNoCollisionEntity(myPed, tp, true)
+                        local tv = GetVehiclePedIsIn(tp, false)
+                        if tv ~= 0 then
+                            SetEntityNoCollisionEntity(myPed, tv, true)
+                        end
+                    end
+                end
+            end
+        end
+
+        -- AUTO REVIVE — se ressusciter automatiquement via native
+        if Vars.Stealth.AutoRevive then
+            if IsEntityDead(myPed) then
+                local c = GetEntityCoords(myPed)
+                local h = GetEntityHeading(myPed)
+                NetworkResurrectLocalPlayer(c.x, c.y, c.z, h, true, false)
+                SetEntityHealth(myPed, 200)
+                ClearPedBloodDamage(myPed)
+                SetPlayerInvincible(PlayerId(), false)
+                Citizen.Wait(500)
+            end
+        end
+
+        -- VEHICULE FANTOME V2 — invisible ET sans collision
+        if Vars.Vehicle.GhostV2 then
+            local myVeh = GetVehiclePedIsIn(myPed, false)
+            if myVeh ~= 0 then
+                SetEntityVisible(myVeh, false, false)
+                SetEntityCollision(myVeh, false, false)
+                SetEntityVisible(myPed, true, false)
+            end
+        end
+
+        -- NO BULLET DROP — annuler gravite projectiles chaque frame
+        if Vars.Weapon.NoBulletDrop then
+            SetWeaponsNoAutoreload(true)
+            -- Modifier la gravite des projectiles de l arme courante
+            local ped = PlayerPedId()
+            local weapon = GetSelectedPedWeapon(ped)
+            if weapon and weapon ~= GetHashKey("WEAPON_UNARMED") then
+                ModifyBulletShootParams(weapon, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            end
+        end
+
+        if not (Vars.Stealth.BubbleShield or Vars.Stealth.AutoRevive or
+                Vars.Vehicle.GhostV2 or Vars.Weapon.NoBulletDrop) then
+            Citizen.Wait(100)
+        end
+    end
+end)
+
+-- Thread Silent Aim
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        if Vars.Weapon.SilentAim then
+            local myPed = PlayerPedId()
+            if IsPedShooting(myPed) then
+                -- Trouver la cible la plus proche dans le FOV
+                local myC = GetEntityCoords(myPed)
+                local best, bestDist = nil, 200.0
+                for _, pid in ipairs(GetActivePlayers()) do
+                    if pid ~= PlayerId() then
+                        local tp = GetPlayerPed(pid)
+                        if DoesEntityExist(tp) and not IsEntityDead(tp) then
+                            local d = #(myC - GetEntityCoords(tp))
+                            if d < bestDist then
+                                bestDist = d; best = tp
+                            end
+                        end
+                    end
+                end
+                if best then
+                    -- Modifier la direction des balles vers la cible
+                    -- sans bouger la camera
+                    local boneIdx = GetEntityBoneIndexByName(best, "SKEL_HEAD")
+                    local boneCoords = GetPedBoneCoords(best, boneIdx, 0, 0, 0)
+                    -- Shooter vers la tete via ShootSingleBulletBetweenCoords
+                    local myCoords = GetPedBoneCoords(myPed, GetEntityBoneIndexByName(myPed, "SKEL_R_Hand"), 0, 0, 0)
+                    local weapon = GetSelectedPedWeapon(myPed)
+                    ShootSingleBulletBetweenCoords(
+                        myCoords.x, myCoords.y, myCoords.z,
+                        boneCoords.x, boneCoords.y, boneCoords.z,
+                        100, true, weapon, myPed, true, false, 1000.0
+                    )
+                end
+            end
+        else Citizen.Wait(50) end
+    end
+end)
+
+-- ============================================================
+-- THREAD — TROLL OPTIONS
+-- ============================================================
+
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        local myPed = PlayerPedId()
+        local myC   = GetEntityCoords(myPed)
+
+        -- Helper: trouver joueur le plus proche
+        local function getNearestPlayer(maxDist)
+            local best, bestDist = nil, maxDist or math.huge
+            for _, pid in ipairs(GetActivePlayers()) do
+                if pid ~= PlayerId() then
+                    local tp = GetPlayerPed(pid)
+                    if DoesEntityExist(tp) then
+                        local d = #(myC - GetEntityCoords(tp))
+                        if d < bestDist then bestDist=d; best=pid end
+                    end
+                end
+            end
+            return best
+        end
+
+        -- CAGE JOUEUR [E]
+        if Vars.Farm.CageJoueur then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Cage Joueur")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(100.0)
+                if pid then
+                    local tp = GetPlayerPed(pid)
+                    local tc = GetEntityCoords(tp)
+                    -- Spawner 4 murs invisibles autour du joueur
+                    -- via des objets barrier attachés
+                    MachoInjectResource2(3,"any",string.format([[
+                        local targetPed = GetPlayerPed(GetPlayerFromServerId(%d))
+                        if not DoesEntityExist(targetPed) then return end
+                        local tc = GetEntityCoords(targetPed)
+                        local barriers = {}
+                        local positions = {
+                            {tc.x+1.2, tc.y, tc.z},
+                            {tc.x-1.2, tc.y, tc.z},
+                            {tc.x, tc.y+1.2, tc.z},
+                            {tc.x, tc.y-1.2, tc.z},
+                        }
+                        for _,pos in ipairs(positions) do
+                            local obj = CreateObject(
+                                GetHashKey("prop_mp_cage_01"),
+                                pos[1], pos[2], pos[3], false, false, false
+                            )
+                            FreezeEntityPosition(obj, true)
+                            AttachEntityToEntity(obj, targetPed,
+                                0, pos[1]-tc.x, pos[2]-tc.y, 0,
+                                0,0,0, false,false,false,false,0,true)
+                            table.insert(barriers, obj)
+                        end
+                        -- Auto-supprimer apres 30s
+                        Citizen.CreateThread(function()
+                            Citizen.Wait(30000)
+                            for _,o in ipairs(barriers) do
+                                if DoesEntityExist(o) then DeleteEntity(o) end
+                            end
+                        end)
+                    ]], GetPlayerServerId(pid)))
+                    MachoMenuNotification("Cage",GetPlayerName(pid).." cage !")
+                else
+                    MachoMenuNotification("Cage","Aucun joueur dans 100m")
+                end
+            end
+        end
+
+        -- STUN LOOP [E]
+        if Vars.Farm.StunLoop then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Stun Loop")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(100.0)
+                if pid then
+                    Vars.Farm.StunTarget = pid
+                    MachoMenuNotification("Stun","Target: "..GetPlayerName(pid))
+                else
+                    MachoMenuNotification("Stun","Aucun joueur dans 100m")
+                end
+            end
+            -- Appliquer le stun en boucle sur la cible
+            if Vars.Farm.StunTarget then
+                local pid = Vars.Farm.StunTarget
+                local tp = GetPlayerPed(pid)
+                if DoesEntityExist(tp) then
+                    MachoInjectResource2(3,"any",string.format([[
+                        local tp = GetPlayerPed(GetPlayerFromServerId(%d))
+                        if DoesEntityExist(tp) then
+                            SetNetworkIdCanMigrate(NetworkGetNetworkIdFromEntity(tp), true)
+                            NetworkRequestControlOfEntity(tp)
+                            if NetworkHasControlOfEntity(tp) then
+                                TaskPlayAnim(tp, "ragdoll@human", "ko_shot_front",
+                                    8.0, -8.0, 1500, 0, 0.0, false, false, false)
+                            end
+                        end
+                    ]], GetPlayerServerId(pid)))
+                end
+            end
+        end
+
+        -- ATTACH JOUEUR [E]
+        if Vars.Farm.AttachJoueur then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Attach Joueur")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(50.0)
+                if pid then
+                    Vars.Farm.AttachTarget = pid
+                    local tp = GetPlayerPed(pid)
+                    AttachEntityToEntity(tp, myPed, 0,
+                        0.5, 0.5, 0.0, 0,0,0,
+                        false,false,false,false,0,true)
+                    MachoMenuNotification("Attach",GetPlayerName(pid).." attache a toi")
+                else
+                    MachoMenuNotification("Attach","Aucun joueur dans 50m")
+                end
+            end
+        end
+
+        -- FAKE LAG [E]
+        if Vars.Farm.FakeLag then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Fake Lag")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(200.0)
+                if pid then
+                    Vars.Farm.FakeLagTarget = pid
+                    MachoMenuNotification("Fake Lag","Target: "..GetPlayerName(pid))
+                else
+                    MachoMenuNotification("Fake Lag","Aucun joueur dans 200m")
+                end
+            end
+            if Vars.Farm.FakeLagTarget then
+                local pid = Vars.Farm.FakeLagTarget
+                local tp = GetPlayerPed(pid)
+                if DoesEntityExist(tp) then
+                    -- Spawner et supprimer des entites reseau autour de lui
+                    -- pour saturer son flux reseau
+                    local tc = GetEntityCoords(tp)
+                    local tmpObj = CreateObject(
+                        GetHashKey("prop_mp_cone_01"),
+                        tc.x + math.random(-2,2)*0.1,
+                        tc.y + math.random(-2,2)*0.1,
+                        tc.z, true, false, false
+                    )
+                    Citizen.Wait(50)
+                    if DoesEntityExist(tmpObj) then DeleteEntity(tmpObj) end
+                end
+            end
+        end
+
+        -- FREEZE CAM JOUEUR [E]
+        if Vars.Troll.FreezeCamJoueur then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Freeze Cam Joueur")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(100.0)
+                if pid then
+                    Vars.Troll.FreezeCamTarget = pid
+                    MachoMenuNotification("Freeze Cam","Target: "..GetPlayerName(pid))
+                else
+                    MachoMenuNotification("Freeze Cam","Aucun joueur dans 100m")
+                end
+            end
+            if Vars.Troll.FreezeCamTarget then
+                local pid = Vars.Troll.FreezeCamTarget
+                local tp  = GetPlayerPed(pid)
+                if DoesEntityExist(tp) then
+                    MachoInjectResource2(3,"any",string.format([[
+                        local tp = GetPlayerPed(GetPlayerFromServerId(%d))
+                        if DoesEntityExist(tp) then
+                            SetNetworkIdCanMigrate(NetworkGetNetworkIdFromEntity(tp),true)
+                            NetworkRequestControlOfEntity(tp)
+                            if NetworkHasControlOfEntity(tp) then
+                                TaskLookAtEntity(tp, tp, 5000, 2048, 3)
+                            end
+                        end
+                    ]], GetPlayerServerId(pid)))
+                end
+            end
+        end
+
+        -- BLACKSCREEN JOUEUR [E]
+        if Vars.Troll.BlackScreenJoueur then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Blackscreen Joueur")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(200.0)
+                if pid then
+                    MachoInjectResource2(3,"any",string.format([[
+                        TriggerClientEvent("hospital:client:SetDead",
+                            GetPlayerFromServerId(%d), true)
+                        TriggerClientEvent("blackout:start",
+                            GetPlayerFromServerId(%d))
+                    ]], GetPlayerServerId(pid), GetPlayerServerId(pid)))
+                    -- Fallback via event local
+                    MachoInjectResource2(3,"any",string.format([[
+                        local pid = GetPlayerFromServerId(%d)
+                        if pid ~= -1 then
+                            local pPed = GetPlayerPed(pid)
+                            NetworkRequestControlOfEntity(pPed)
+                            if NetworkHasControlOfEntity(pPed) then
+                                DoScreenFadeOut(0)
+                            end
+                        end
+                    ]], GetPlayerServerId(pid)))
+                    MachoMenuNotification("Blackscreen",GetPlayerName(pid).." blackscreene !")
+                else
+                    MachoMenuNotification("Blackscreen","Aucun joueur dans 200m")
+                end
+            end
+        end
+
+        -- INFINITE WANTED JOUEUR [E]
+        if Vars.Troll.InfiniteWantedJoueur then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Infinite Wanted")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local pid = getNearestPlayer(500.0)
+                if pid then
+                    Vars.Troll.InfiniteWantedTarget = pid
+                    MachoMenuNotification("Wanted","Target: "..GetPlayerName(pid))
+                else
+                    MachoMenuNotification("Wanted","Aucun joueur dans 500m")
+                end
+            end
+            if Vars.Troll.InfiniteWantedTarget then
+                local pid = Vars.Troll.InfiniteWantedTarget
+                local tp  = GetPlayerPed(pid)
+                if DoesEntityExist(tp) then
+                    MachoInjectResource2(3,"any",string.format([[
+                        local p = GetPlayerFromServerId(%d)
+                        if p ~= -1 then
+                            SetPlayerWantedLevel(p, 5, false)
+                            SetPlayerWantedLevelNow(p, false)
+                        end
+                    ]], GetPlayerServerId(pid)))
+                end
+            end
+        end
+
+        -- LOCK VEHICULE JOUEUR [E]
+        if Vars.Vehicle.LockJoueurVeh then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Lock Vehicule Joueur")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local best, bestDist = nil, 500.0
+                for _,pid in ipairs(GetActivePlayers()) do
+                    if pid~=PlayerId() then
+                        local tv=GetVehiclePedIsIn(GetPlayerPed(pid),false)
+                        if tv~=0 then
+                            local d=#(myC-GetEntityCoords(tv))
+                            if d<bestDist then bestDist=d; best=tv end
+                        end
+                    end
+                end
+                if best then
+                    local vNId = NetworkGetNetworkIdFromEntity(best)
+                    MachoInjectResource2(3,"any",string.format([[
+                        local veh = NetworkGetEntityFromNetworkId(%d)
+                        if DoesEntityExist(veh) then
+                            SetNetworkIdCanMigrate(%d, true)
+                            NetworkRequestControlOfEntity(veh)
+                            Citizen.Wait(100)
+                            if NetworkHasControlOfEntity(veh) then
+                                SetVehicleDoorsLocked(veh, 3)
+                                SetVehicleDoorsLockedForAllPlayers(veh, true)
+                            end
+                        end
+                    ]], vNId, vNId))
+                    MachoMenuNotification("Lock Veh","Vehicule verrouille !")
+                else
+                    MachoMenuNotification("Lock Veh","Aucun joueur en vehicule dans 500m")
+                end
+            end
+        end
+
+        -- EJECT PASSAGER SILENCIEUX [E]
+        if Vars.Vehicle.EjectPassager then
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ Eject Passager")
+            EndTextCommandDisplayHelp(0,false,false,-1)
+            if IsControlJustPressed(0,38) then
+                local myVeh = GetVehiclePedIsIn(myPed, false)
+                if myVeh ~= 0 then
+                    for s=0, GetVehicleMaxNumberOfPassengers(myVeh) do
+                        local p = GetPedInVehicleSeat(myVeh, s)
+                        if p~=0 and DoesEntityExist(p) and p~=myPed then
+                            local pNId = NetworkGetNetworkIdFromEntity(p)
+                            MachoInjectResource2(3,"any",string.format([[
+                                local p = NetworkGetEntityFromNetworkId(%d)
+                                local v = GetVehiclePedIsIn(p, false)
+                                if DoesEntityExist(p) and v~=0 then
+                                    SetNetworkIdCanMigrate(%d, true)
+                                    NetworkRequestControlOfEntity(p)
+                                    Citizen.Wait(80)
+                                    if NetworkHasControlOfEntity(p) then
+                                        ClearPedTasksImmediately(p)
+                                        SetEntityCoords(p,
+                                            GetEntityCoords(v).x+2,
+                                            GetEntityCoords(v).y,
+                                            GetEntityCoords(v).z,
+                                            false,false,false,false)
+                                    end
+                                end
+                            ]], pNId, pNId))
+                        end
+                    end
+                    MachoMenuNotification("Eject","Passagers ejectes silencieusement")
+                else
+                    MachoMenuNotification("Eject","Monte dans un vehicule d abord")
+                end
+            end
+        end
+
+        if not (Vars.Farm.CageJoueur or Vars.Farm.StunLoop or Vars.Farm.AttachJoueur or
+                Vars.Farm.FakeLag or Vars.Troll.FreezeCamJoueur or
+                Vars.Troll.BlackScreenJoueur or Vars.Troll.InfiniteWantedJoueur or
+                Vars.Vehicle.LockJoueurVeh or Vars.Vehicle.EjectPassager) then
+            Citizen.Wait(100)
+        end
+    end
+end)
 
 MachoInjectResource2(3, "any", [[
     -- Override NetworkBail pour le rendre furtif
@@ -3051,49 +3851,84 @@ end)
 
 local function FGI(veh)
     if not DoesEntityExist(veh) then return end
-    MachoIsolatedInject(string.format([[
-        SetEntityVisible(%d, false, false)
-        SetEntityCollision(%d, false, false)
-    ]], veh, veh))
-    for s=-1, GetVehicleMaxNumberOfPassengers(veh) do
+    -- Rendre le vehicule invisible
+    SetEntityVisible(veh, false, false)
+    -- Garder TOI visible — ne toucher qu aux passagers si PassagerVisible desactive
+    local myPed = PlayerPedId()
+    for s = -1, GetVehicleMaxNumberOfPassengers(veh) do
         local p = GetPedInVehicleSeat(veh, s)
         if p ~= 0 and DoesEntityExist(p) then
-            SetEntityVisible(p, Vars.Farm.PassagerVisible, false)
+            if p == myPed then
+                -- TOI toujours visible
+                SetEntityVisible(p, true, false)
+            else
+                -- Les autres passagers selon le toggle
+                SetEntityVisible(p, Vars.Farm.PassagerVisible, false)
+            end
         end
     end
 end
 
 local function FGV(veh)
     if not DoesEntityExist(veh) then return end
-    MachoIsolatedInject(string.format([[
-        SetEntityVisible(%d, true, false)
-        SetEntityCollision(%d, true, false)
-    ]], veh, veh))
-    for s=-1, GetVehicleMaxNumberOfPassengers(veh) do
+    -- Restaurer vehicule visible
+    SetEntityVisible(veh, true, false)
+    -- Restaurer tous les occupants visibles
+    for s = -1, GetVehicleMaxNumberOfPassengers(veh) do
         local p = GetPedInVehicleSeat(veh, s)
-        if p ~= 0 and DoesEntityExist(p) then SetEntityVisible(p, true, false) end
+        if p ~= 0 and DoesEntityExist(p) then
+            SetEntityVisible(p, true, false)
+        end
     end
 end
 
 Citizen.CreateThread(function()
     while not killmenu do
-        Citizen.Wait(50)
+        Citizen.Wait(0)
         local myPed = PlayerPedId()
         local myVeh = GetVehiclePedIsIn(myPed, false)
+
         if Vars.Farm.VehicleInvisible then
-            if myVeh ~= 0 and myVeh ~= farmGhostVeh then
-                if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGV(farmGhostVeh) end
-                farmGhostVeh = myVeh
+            if myVeh ~= 0 then
+                -- Nouveau vehicule detecte
+                if myVeh ~= farmGhostVeh then
+                    if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
+                        FGV(farmGhostVeh)
+                    end
+                    farmGhostVeh = myVeh
+                end
+                -- Appliquer invisibilite chaque frame
+                -- pour contrer les re-rendus du moteur
+                SetEntityVisible(myVeh, false, false)
+                -- S assurer que TOI tu restes visible
+                SetEntityVisible(myPed, true, false)
+                -- Autres occupants
+                for s = -1, GetVehicleMaxNumberOfPassengers(myVeh) do
+                    local p = GetPedInVehicleSeat(myVeh, s)
+                    if p ~= 0 and DoesEntityExist(p) and p ~= myPed then
+                        SetEntityVisible(p, Vars.Farm.PassagerVisible, false)
+                    end
+                end
+            else
+                -- On est sorti du vehicule — restaurer
+                if farmGhostVeh and DoesEntityExist(farmGhostVeh) then
+                    FGV(farmGhostVeh)
+                    farmGhostVeh = nil
+                end
             end
-            if farmGhostVeh and DoesEntityExist(farmGhostVeh) then FGI(farmGhostVeh) end
         elseif farmGhostVeh then
-            FGV(farmGhostVeh); farmGhostVeh = nil
+            FGV(farmGhostVeh)
+            farmGhostVeh = nil
         end
+
         if Vars.Farm.AutoInvisible and not Vars.Farm.VehicleInvisible then
             if myVeh ~= 0 and myVeh ~= farmGhostVeh then
                 Citizen.Wait(800)
                 local vN = GetVehiclePedIsIn(myPed, false)
-                if vN ~= 0 then farmGhostVeh=vN; Vars.Farm.VehicleInvisible=true end
+                if vN ~= 0 then
+                    farmGhostVeh = vN
+                    Vars.Farm.VehicleInvisible = true
+                end
             end
         end
     end
@@ -3742,9 +4577,123 @@ Citizen.CreateThread(function()
 end)
 
 -- ============================================================
--- THREAD ANTI-TP — Verrou de position
+-- THREAD NOCLIP — F9 pour toggle, camera-based, molette vitesse
+-- ============================================================
+
+Citizen.CreateThread(function()
+    local speed    = 0.08
+    local wasOn    = false
+
+    while not killmenu do
+        Citizen.Wait(0)
+
+        -- F9 (VK 0x78) gere via MachoOnKeyDown plus bas
+        -- Ici on gere l etat actif du noclip
+
+        if noclipping then
+            local ped = PlayerPedId()
+
+            -- Activer no-collision au debut
+            if not wasOn then
+                SetEntityCollision(ped, false, false)
+                wasOn = true
+            end
+
+            -- Lire direction camera
+            local camFwd = GetGameplayCamForwardVector()
+
+            -- Vecteur avant horizontal
+            local fLen = math.sqrt(camFwd.x*camFwd.x + camFwd.y*camFwd.y)
+            local fwdH = fLen > 0.001
+                and vector3(camFwd.x/fLen, camFwd.y/fLen, 0.0)
+                or  vector3(0.0, 1.0, 0.0)
+
+            -- Vecteur droite
+            local right = vector3(fwdH.y, -fwdH.x, 0.0)
+
+            -- Molette vitesse (pas besoin de DisableAllControls)
+            if IsControlJustPressed(0, 15) then
+                speed = math.min(speed * 1.35, 5.0)
+            end
+            if IsControlJustPressed(0, 14) then
+                speed = math.max(speed / 1.35, 0.01)
+            end
+
+            -- Vitesse avec Shift/Ctrl
+            local curSpeed = speed
+            if IsControlPressed(0, 21) then       -- Shift
+                curSpeed = speed * 4.0
+            end
+
+            -- Mouvement ZQSD — on lit les controles normaux
+            -- pas besoin de DisableAllControlActions
+            local move = vector3(0.0, 0.0, 0.0)
+
+            if IsControlPressed(0, 32) then  -- Z/W avant
+                move = vector3(
+                    move.x + fwdH.x + camFwd.x * 0.3,
+                    move.y + fwdH.y + camFwd.y * 0.3,
+                    move.z + camFwd.z * 0.5
+                )
+            end
+            if IsControlPressed(0, 33) then  -- S arriere
+                move = vector3(
+                    move.x - fwdH.x,
+                    move.y - fwdH.y,
+                    move.z - camFwd.z * 0.3
+                )
+            end
+            if IsControlPressed(0, 34) then  -- Q gauche
+                move = vector3(move.x - right.x, move.y - right.y, move.z)
+            end
+            if IsControlPressed(0, 35) then  -- D droite
+                move = vector3(move.x + right.x, move.y + right.y, move.z)
+            end
+            if IsControlPressed(0, 22) then  -- Espace monter
+                move = vector3(move.x, move.y, move.z + 1.0)
+            end
+            if IsControlPressed(0, 36) then  -- Ctrl descendre
+                move = vector3(move.x, move.y, move.z - 1.0)
+                curSpeed = math.max(curSpeed * 0.4, 0.01)
+            end
+
+            -- Normaliser
+            local mLen = math.sqrt(move.x*move.x + move.y*move.y + move.z*move.z)
+            if mLen > 0.001 then
+                move = vector3(
+                    (move.x/mLen) * curSpeed,
+                    (move.y/mLen) * curSpeed,
+                    (move.z/mLen) * curSpeed
+                )
+
+                local pos    = GetEntityCoords(ped)
+                local newPos = vector3(pos.x+move.x, pos.y+move.y, pos.z+move.z)
+                SetEntityCoords(ped, newPos.x, newPos.y, newPos.z,
+                    false, false, false, false)
+            end
+
+            -- Affichage vitesse
+            SetTextFont(0); SetTextScale(0.28, 0.28)
+            SetTextColour(255, 255, 255, 200)
+            BeginTextCommandDisplayText("STRING")
+            AddTextComponentSubstringPlayerName(
+                string.format("Noclip [F9]  vitesse: %.2f  Shift=x4  Ctrl=lent  Molette +/-", speed)
+            )
+            EndTextCommandDisplayText(0.5, 0.97)
+
+        else
+            -- Desactiver no-collision quand on sort du noclip
+            if wasOn then
+                local ped = PlayerPedId()
+                SetEntityCollision(ped, true, false)
+                wasOn = false
+            end
+            Citizen.Wait(50)
+        end
+    end
+end)
 -- Memorise la position et la reforce si le moteur la change quand meme
--- Evite le mini-freeze en anticipant le rollback plutot qu'en le subissant
+-- Ignore le noclip et les TPs volontaires du menu
 -- ============================================================
 
 Citizen.CreateThread(function()
@@ -3758,35 +4707,40 @@ Citizen.CreateThread(function()
             local ped = PlayerPedId()
             local c   = GetEntityCoords(ped)
 
-            if lockedPos == nil then
-                -- Premiere frame avec AntiTP: memoriser la position actuelle
+            -- Si noclip actif: toujours mettre a jour la pos locked
+            -- pour ne pas se battre contre le noclip
+            if noclipping then
+                lockedPos  = c
+                lockedHead = GetEntityHeading(ped)
+
+            elseif lockedPos == nil then
                 lockedPos  = c
                 lockedHead = GetEntityHeading(ped)
             else
                 local drift = #(c - lockedPos)
 
-                -- Si on a bouge normalement (input joueur) → mettre a jour la pos locked
+                -- Mouvement normal (ZQSD) ou en vehicule ou TP volontaire (Smooth TP etc)
+                -- → mettre a jour la pos locked
                 if IsControlPressed(0, 30) or IsControlPressed(0, 31) or
                    IsControlPressed(0, 32) or IsControlPressed(0, 33) or
+                   IsDisabledControlPressed(0, 30) or IsDisabledControlPressed(0, 31) or
+                   IsDisabledControlPressed(0, 32) or IsDisabledControlPressed(0, 33) or
                    IsPedInAnyVehicle(ped, false) then
                     lockedPos  = c
                     lockedHead = GetEntityHeading(ped)
 
-                -- Si drift > 3m ET pas de mouvement joueur = TP force detecte
+                -- Drift > 3m sans input = TP force du serveur → bloquer
                 elseif drift > 3.0 then
-                    -- Retour position immediat sans animation = zero freeze visuel
                     SetEntityCoords(ped, lockedPos.x, lockedPos.y, lockedPos.z,
                         false, false, false, false)
                     SetEntityHeading(ped, lockedHead)
 
-                    -- Notification max 1x/2sec pour ne pas spammer
                     local now = GetGameTimer()
                     if now - lastNotif > 2000 then
                         MachoMenuNotification("Anti-TP","TP bloque")
                         lastNotif = now
                     end
                 else
-                    -- Mouvement normal autorise
                     lockedPos  = c
                     lockedHead = GetEntityHeading(ped)
                 end

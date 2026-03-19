@@ -59,7 +59,7 @@ local Vars = {
         SoloSession=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false,
-        AntiTP=false, KickVehicule=false, TPVehicle=false, EjectPassagers=false,
+        AntiTP=false, KickVehicule=false, TPVehicle=false, TPVehicule=false, EjectPassagers=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -337,8 +337,8 @@ end
 local function MB(menuId, label, subtext, action)
     AddItem(menuId, {type="button", label=label, subtext=subtext or "", action=action})
 end
-local function MC(menuId, label, varRef, varKey, onEnable, onDisable)
-    AddItem(menuId, {type="checkbox", label=label, varRef=varRef, varKey=varKey,
+local function MC(menuId, label, varTable, varKey, onEnable, onDisable)
+    AddItem(menuId, {type="checkbox", label=label, varTable=varTable, varKey=varKey,
         onEnable=onEnable, onDisable=onDisable})
 end
 local function MS(menuId, label, subtext, targetId)
@@ -368,44 +368,44 @@ end)
 
 -- NEW
 CreateMenu("new", "New", "main")
-MC("new","Collision Vehicule","Vars.Farm","CollisionVehicule",
+MC("new","Collision Vehicule",Vars.Farm,"CollisionVehicule",
     function() Vars.Farm.CollisionVehicule=true end,
     function() Vars.Farm.CollisionVehicule=false end)
-MC("new","F Descendre Joueur","Vars.Farm","FDescendreJoueur",
+MC("new","F Descendre Joueur",Vars.Farm,"FDescendreJoueur",
     function() Vars.Farm.FDescendreJoueur=true end,
     function() Vars.Farm.FDescendreJoueur=false end)
-MC("new","Anti-TP","Vars.Farm","AntiTP",
+MC("new","Anti-TP",Vars.Farm,"AntiTP",
     function() Vars.Farm.AntiTP=true; _G._ZeyAntiTP=true
         MachoMenuNotification("Anti-TP","Actif") end,
     function() Vars.Farm.AntiTP=false; _G._ZeyAntiTP=false
         MachoMenuNotification("Anti-TP","Desactive") end)
-MC("new","Kick Vehicule [E]","Vars.Farm","KickVehicule",
+MC("new","Kick Vehicule [E]",Vars.Farm,"KickVehicule",
     function() Vars.Farm.KickVehicule=true
         MachoMenuNotification("Kick Veh","E pour prendre le vehicule du joueur") end,
     function() Vars.Farm.KickVehicule=false end)
-MC("new","Eject Passagers [E]","Vars.Farm","TPVehicle",
-    function() Vars.Farm.TPVehicle=true
-        MachoMenuNotification("Eject Passagers","E pour ejecter tous les passagers") end,
-    function() Vars.Farm.TPVehicle=false end)
-MC("new","Eject Passagers [A]","Vars.Farm","EjectPassagers",
+MC("new","TP Dans Vehicule [E]",Vars.Farm,"TPVehicule",
+    function() Vars.Farm.TPVehicule=true
+        MachoMenuNotification("TP Vehicule","E pour entrer dans le vehicule le plus proche") end,
+    function() Vars.Farm.TPVehicule=false end)
+MC("new","Eject Passagers [A]",Vars.Farm,"EjectPassagers",
     function() Vars.Farm.EjectPassagers=true
         MachoMenuNotification("Eject Passagers","A pour ejecter tous les passagers de ton vehicule") end,
     function() Vars.Farm.EjectPassagers=false end)
 
 -- FARM
 CreateMenu("farm", "Farm", "main")
-MC("farm","Carjack","Vars.Farm","Carjack",
+MC("farm","Carjack",Vars.Farm,"Carjack",
     function() Vars.Farm.Carjack=true end,
     function() Vars.Farm.Carjack=false end)
-MC("farm","Carjack Distance [E] PNJ+Joueurs","Vars.Farm","CarjackDist",
+MC("farm","Carjack Distance [E] PNJ+Joueurs",Vars.Farm,"CarjackDist",
     function() Vars.Farm.CarjackDist=true; Vars.Farm.CarjackDistV2=false
         MachoMenuNotification("Carjack Dist","E pour declencher") end,
     function() Vars.Farm.CarjackDist=false end)
-MC("farm","Carjack Distance V2 [E] Joueurs","Vars.Farm","CarjackDistV2",
+MC("farm","Carjack Distance V2 [E] Joueurs",Vars.Farm,"CarjackDistV2",
     function() Vars.Farm.CarjackDistV2=true; Vars.Farm.CarjackDist=false
         MachoMenuNotification("Carjack Dist V2","E pour declencher") end,
     function() Vars.Farm.CarjackDistV2=false end)
-MC("farm","Solo Session","Vars.Farm","SoloSession",
+MC("farm","Solo Session",Vars.Farm,"SoloSession",
     function()
         Vars.Farm.SoloSession=true
         MachoMenuNotification("Solo Session","Changement instance...")
@@ -436,7 +436,7 @@ MC("farm","Solo Session","Vars.Farm","SoloSession",
         end)
     end)
 MS("farm","Options Solo Session","Voir Joueur","solosession")
-MC("farm","Vehicule Invisible","Vars.Farm","VehicleInvisible",
+MC("farm","Vehicule Invisible",Vars.Farm,"VehicleInvisible",
     function()
         Vars.Farm.VehicleInvisible=true
         local veh=GetVehiclePedIsIn(PlayerPedId(),false)
@@ -457,7 +457,7 @@ MC("farm","Vehicule Invisible","Vars.Farm","VehicleInvisible",
 MS("farm","Options Vehicule Invisible","Auto / Passager","ghostopts")
 
 CreateMenu("solosession","Options Solo Session","farm")
-MC("solosession","Voir Joueur","Vars.Farm","VoirJoueur",
+MC("solosession","Voir Joueur",Vars.Farm,"VoirJoueur",
     function()
         if Vars.Farm.SoloSession then Vars.Farm.VoirJoueur=true
         else MachoMenuNotification("Solo","Activer Solo Session d abord") end
@@ -465,10 +465,10 @@ MC("solosession","Voir Joueur","Vars.Farm","VoirJoueur",
     function() Vars.Farm.VoirJoueur=false end)
 
 CreateMenu("ghostopts","Options Vehicule Invisible","farm")
-MC("ghostopts","Auto Invisible","Vars.Farm","AutoInvisible",
+MC("ghostopts","Auto Invisible",Vars.Farm,"AutoInvisible",
     function() Vars.Farm.AutoInvisible=true end,
     function() Vars.Farm.AutoInvisible=false end)
-MC("ghostopts","Passager Visible","Vars.Farm","PassagerVisible",
+MC("ghostopts","Passager Visible",Vars.Farm,"PassagerVisible",
     function() Vars.Farm.PassagerVisible=true end,
     function() Vars.Farm.PassagerVisible=false end)
 
@@ -613,43 +613,43 @@ MC("allplayers","Tug Boats sur Joueurs","",nil,
 
 -- SELF
 CreateMenu("self","Self Options","main")
-MC("self","Invisible","Vars.Self","invisiblitity",
+MC("self","Invisible",Vars.Self,"invisiblitity",
     function() Vars.Self.invisiblitity=true end,
     function() Vars.Self.invisiblitity=false; SetEntityVisible(PlayerPedId(),true,false) end)
-MC("self","Godmode","Vars.Self","godmode",
+MC("self","Godmode",Vars.Self,"godmode",
     function() Vars.Self.godmode=true end,
     function() Vars.Self.godmode=false; SetEntityInvincible(PlayerPedId(),false); SetPlayerInvincible(PlayerId(),false) end)
-MC("self","Semi-Godmode","Vars.Self","AutoHealthRefil",
+MC("self","Semi-Godmode",Vars.Self,"AutoHealthRefil",
     function() Vars.Self.AutoHealthRefil=true end,
     function() Vars.Self.AutoHealthRefil=false end)
-MC("self","Infinite Stamina","Vars.Self","infstamina",
+MC("self","Infinite Stamina",Vars.Self,"infstamina",
     function() Vars.Self.infstamina=true end,
     function() Vars.Self.infstamina=false end)
-MC("self","No Ragdoll","Vars.Self","noragdoll",
+MC("self","No Ragdoll",Vars.Self,"noragdoll",
     function() Vars.Self.noragdoll=true end,
     function() Vars.Self.noragdoll=false; SetPedCanRagdoll(PlayerPedId(),true) end)
-MC("self","Never Wanted","Vars.Self","FreezeWantedLevel",
+MC("self","Never Wanted",Vars.Self,"FreezeWantedLevel",
     function() Vars.Self.FreezeWantedLevel=true end,
     function() Vars.Self.FreezeWantedLevel=false end)
-MC("self","Player Coords","Vars.Self","playercoords",
+MC("self","Player Coords",Vars.Self,"playercoords",
     function() Vars.Self.playercoords=true end,
     function() Vars.Self.playercoords=false end)
-MC("self","Force Radar","Vars.Self","forceradar",
+MC("self","Force Radar",Vars.Self,"forceradar",
     function() Vars.Self.forceradar=true end,
     function() Vars.Self.forceradar=false end)
-MC("self","Super Jump","Vars.Self","superjump",
+MC("self","Super Jump",Vars.Self,"superjump",
     function() Vars.Self.superjump=true end,
     function() Vars.Self.superjump=false end)
-MC("self","Super Run","Vars.Self","superrun",
+MC("self","Super Run",Vars.Self,"superrun",
     function() Vars.Self.superrun=true end,
     function() Vars.Self.superrun=false end)
-MC("self","Moon Walk","Vars.Self","MoonWalk",
+MC("self","Moon Walk",Vars.Self,"MoonWalk",
     function() Vars.Self.MoonWalk=true end,
     function() Vars.Self.MoonWalk=false; ResetPedMoveRateOverride(PlayerPedId()) end)
-MC("self","Infinite Combat Roll","Vars.Self","InfiniteCombatRoll",
+MC("self","Infinite Combat Roll",Vars.Self,"InfiniteCombatRoll",
     function() Vars.Self.InfiniteCombatRoll=true end,
     function() Vars.Self.InfiniteCombatRoll=false end)
-MC("self","Anti Headshot","Vars.Self","AntiHeadshot",
+MC("self","Anti Headshot",Vars.Self,"AntiHeadshot",
     function() Vars.Self.AntiHeadshot=true end,
     function() Vars.Self.AntiHeadshot=false; SetPedSuffersCriticalHits(PlayerPedId(),true) end)
 MC("self","Thermal Vision","",nil,
@@ -675,16 +675,16 @@ end)
 MB("self","Freeze/Unfreeze Self","", function()
     FreezeEntityPosition(PlayerPedId(), not IsEntityPositionFrozen(PlayerPedId()))
 end)
-MC("self","Disable Object Collisions","Vars.Self","disableobjectcollisions",
+MC("self","Disable Object Collisions",Vars.Self,"disableobjectcollisions",
     function() Vars.Self.disableobjectcollisions=true end,
     function() Vars.Self.disableobjectcollisions=false end)
-MC("self","Disable Ped Collisions","Vars.Self","disablepedcollisions",
+MC("self","Disable Ped Collisions",Vars.Self,"disablepedcollisions",
     function() Vars.Self.disablepedcollisions=true end,
     function() Vars.Self.disablepedcollisions=false end)
 
 -- VEHICLE
 CreateMenu("vehicle","Vehicle Options","main")
-MC("vehicle","Full Unlock Vehicule","Vars.Vehicle","FullUnlockVehicle",
+MC("vehicle","Full Unlock Vehicule",Vars.Vehicle,"FullUnlockVehicle",
     function() Vars.Vehicle.FullUnlockVehicle=true end,
     function() Vars.Vehicle.FullUnlockVehicle=false end)
 MS("vehicle","Spawn Vehicles","Spawner","spawnveh")
@@ -722,40 +722,40 @@ MB("vehicle","Boost","", function()
         SetEntityVelocity(v,-math.sin(r)*50,math.cos(r)*50,0)
     end
 end)
-MC("vehicle","Vehicle Godmode","Vars.Vehicle","vehgodmode",
+MC("vehicle","Vehicle Godmode",Vars.Vehicle,"vehgodmode",
     function() Vars.Vehicle.vehgodmode=true end,
     function() Vars.Vehicle.vehgodmode=false end)
-MC("vehicle","Always Clean","Vars.Vehicle","AutoClean",
+MC("vehicle","Always Clean",Vars.Vehicle,"AutoClean",
     function() Vars.Vehicle.AutoClean=true end,
     function() Vars.Vehicle.AutoClean=false end)
-MC("vehicle","Speed Boost on Horn","Vars.Vehicle","speedboost",
+MC("vehicle","Speed Boost on Horn",Vars.Vehicle,"speedboost",
     function() Vars.Vehicle.speedboost=true end,
     function() Vars.Vehicle.speedboost=false end)
-MC("vehicle","Waterproof","Vars.Vehicle","Waterproof",
+MC("vehicle","Waterproof",Vars.Vehicle,"Waterproof",
     function() Vars.Vehicle.Waterproof=true end,
     function() Vars.Vehicle.Waterproof=false end)
-MC("vehicle","Rainbow Car","Vars.Vehicle","rainbowcar",
+MC("vehicle","Rainbow Car",Vars.Vehicle,"rainbowcar",
     function() Vars.Vehicle.rainbowcar=true end,
     function() Vars.Vehicle.rainbowcar=false end)
-MC("vehicle","Always Wheelie","Vars.Vehicle","AlwaysWheelie",
+MC("vehicle","Always Wheelie",Vars.Vehicle,"AlwaysWheelie",
     function() Vars.Vehicle.AlwaysWheelie=true end,
     function() Vars.Vehicle.AlwaysWheelie=false end)
-MC("vehicle","Easy Handling","Vars.Vehicle","EasyHandling",
+MC("vehicle","Easy Handling",Vars.Vehicle,"EasyHandling",
     function() Vars.Vehicle.EasyHandling=true end,
     function() Vars.Vehicle.EasyHandling=false end)
-MC("vehicle","Drive On Water","Vars.Vehicle","DriveOnWater",
+MC("vehicle","Drive On Water",Vars.Vehicle,"DriveOnWater",
     function() Vars.Vehicle.DriveOnWater=true end,
     function() Vars.Vehicle.DriveOnWater=false end)
-MC("vehicle","No Bike Fall","Vars.Vehicle","NoBikeFall",
+MC("vehicle","No Bike Fall",Vars.Vehicle,"NoBikeFall",
     function() Vars.Vehicle.NoBikeFall=true end,
     function() Vars.Vehicle.NoBikeFall=false end)
-MC("vehicle","Force Launch Control","Vars.Vehicle","forcelauncontrol",
+MC("vehicle","Force Launch Control",Vars.Vehicle,"forcelauncontrol",
     function() Vars.Vehicle.forcelauncontrol=true end,
     function() Vars.Vehicle.forcelauncontrol=false end)
-MC("vehicle","Speedometre","Vars.Vehicle","speedometer",
+MC("vehicle","Speedometre",Vars.Vehicle,"speedometer",
     function() Vars.Vehicle.speedometer=true end,
     function() Vars.Vehicle.speedometer=false end)
-MC("vehicle","ZeyMenu Plate","Vars.Vehicle","ZeyMenuplate",
+MC("vehicle","ZeyMenu Plate",Vars.Vehicle,"ZeyMenuplate",
     function() Vars.Vehicle.ZeyMenuplate=true end,
     function() Vars.Vehicle.ZeyMenuplate=false end)
 MC("vehicle","Vehicle Snatcher","",nil,
@@ -834,7 +834,7 @@ end)
 
 -- TELEPORT
 CreateMenu("teleport","Teleport Options","main")
-MC("teleport","Smooth Teleport","Vars.Teleport","smoothteleport",
+MC("teleport","Smooth Teleport",Vars.Teleport,"smoothteleport",
     function() Vars.Teleport.smoothteleport=true end,
     function() Vars.Teleport.smoothteleport=false end)
 MB("teleport","Teleport To Waypoint","", function()
@@ -867,7 +867,7 @@ MB("teleport","TP Ocean Aleatoire","2 etapes bypass AC", function()
     SetEntityCoords(ped,d.x,d.y,d.z,false,false,false,false)
     MachoMenuNotification("TP Ocean","Arrive a "..d.nom.." !")
 end)
-MC("teleport","TP Ocean V2 [W] Avec Vehicule","Vars.Teleport","OceanV2",
+MC("teleport","TP Ocean V2 [W] Avec Vehicule",Vars.Teleport,"OceanV2",
     function()
         Vars.Teleport.OceanV2=true
         MachoMenuNotification("TP Ocean V2","W pour voler vehicule + TP ocean")
@@ -899,57 +899,57 @@ MB("weapon","Refill All Ammo","", function()
         SetPedAmmo(PlayerPedId(),GetHashKey(w),9999)
     end
 end)
-MC("weapon","Infinite Ammo","Vars.Weapon","InfAmmo",
+MC("weapon","Infinite Ammo",Vars.Weapon,"InfAmmo",
     function() Vars.Weapon.InfAmmo=true end,
     function() Vars.Weapon.InfAmmo=false end)
-MC("weapon","No Reload","Vars.Weapon","NoReload",
+MC("weapon","No Reload",Vars.Weapon,"NoReload",
     function() Vars.Weapon.NoReload=true end,
     function() Vars.Weapon.NoReload=false end)
-MC("weapon","Explosive Ammo","Vars.Weapon","ExplosiveAmmo",
+MC("weapon","Explosive Ammo",Vars.Weapon,"ExplosiveAmmo",
     function() Vars.Weapon.ExplosiveAmmo=true end,
     function() Vars.Weapon.ExplosiveAmmo=false end)
-MC("weapon","Rapid Fire","Vars.Weapon","RapidFire",
+MC("weapon","Rapid Fire",Vars.Weapon,"RapidFire",
     function() Vars.Weapon.RapidFire=true end,
     function() Vars.Weapon.RapidFire=false end)
-MC("weapon","Trigger Bot","Vars.Weapon","TriggerBot",
+MC("weapon","Trigger Bot",Vars.Weapon,"TriggerBot",
     function() Vars.Weapon.TriggerBot=true end,
     function() Vars.Weapon.TriggerBot=false end)
-MC("weapon","No Recoil","Vars.Weapon","NoRecoil",
+MC("weapon","No Recoil",Vars.Weapon,"NoRecoil",
     function() Vars.Weapon.NoRecoil=true end,
     function() Vars.Weapon.NoRecoil=false end)
-MC("weapon","Crosshair","Vars.Weapon","Crosshair",
+MC("weapon","Crosshair",Vars.Weapon,"Crosshair",
     function() Vars.Weapon.Crosshair=true end,
     function() Vars.Weapon.Crosshair=false end)
-MC("weapon","Bullet Tracers","Vars.Weapon","Tracers",
+MC("weapon","Bullet Tracers",Vars.Weapon,"Tracers",
     function() Vars.Weapon.Tracers=true end,
     function() Vars.Weapon.Tracers=false end)
-MC("weapon","Spinbot","Vars.Weapon","Spinbot",
+MC("weapon","Spinbot",Vars.Weapon,"Spinbot",
     function() Vars.Weapon.Spinbot=true end,
     function() Vars.Weapon.Spinbot=false end)
-MC("weapon","Ragebot","Vars.Weapon","RageBot",
+MC("weapon","Ragebot",Vars.Weapon,"RageBot",
     function() Vars.Weapon.RageBot=true end,
     function() Vars.Weapon.RageBot=false end)
-MC("weapon","One Shot","Vars.Weapon","OneShot",
+MC("weapon","One Shot",Vars.Weapon,"OneShot",
     function() Vars.Weapon.OneShot=true end,
     function() Vars.Weapon.OneShot=false end)
 
 CreateMenu("aimbot","Aimbot","weapon")
-MC("aimbot","Aimbot","Vars.Weapon.AimBot","Enabled",
+MC("aimbot","Aimbot",Vars.Weapon.AimBot,"Enabled",
     function() Vars.Weapon.AimBot.Enabled=true end,
     function() Vars.Weapon.AimBot.Enabled=false end)
-MC("aimbot","Through Walls","Vars.Weapon.AimBot","ThroughWalls",
+MC("aimbot","Through Walls",Vars.Weapon.AimBot,"ThroughWalls",
     function() Vars.Weapon.AimBot.ThroughWalls=true end,
     function() Vars.Weapon.AimBot.ThroughWalls=false end)
-MC("aimbot","Draw FOV","Vars.Weapon.AimBot","DrawFOV",
+MC("aimbot","Draw FOV",Vars.Weapon.AimBot,"DrawFOV",
     function() Vars.Weapon.AimBot.DrawFOV=true end,
     function() Vars.Weapon.AimBot.DrawFOV=false end)
-MC("aimbot","Only Target Players","Vars.Weapon.AimBot","OnlyPlayers",
+MC("aimbot","Only Target Players",Vars.Weapon.AimBot,"OnlyPlayers",
     function() Vars.Weapon.AimBot.OnlyPlayers=true end,
     function() Vars.Weapon.AimBot.OnlyPlayers=false end)
-MC("aimbot","Ignore Friends","Vars.Weapon.AimBot","IgnoreFriends",
+MC("aimbot","Ignore Friends",Vars.Weapon.AimBot,"IgnoreFriends",
     function() Vars.Weapon.AimBot.IgnoreFriends=true end,
     function() Vars.Weapon.AimBot.IgnoreFriends=false end)
-MC("aimbot","Visibility Check","Vars.Weapon.AimBot","InvisibilityCheck",
+MC("aimbot","Visibility Check",Vars.Weapon.AimBot,"InvisibilityCheck",
     function() Vars.Weapon.AimBot.InvisibilityCheck=true end,
     function() Vars.Weapon.AimBot.InvisibilityCheck=false end)
 MB("aimbot","Bone: Head","", function() Vars.Weapon.AimBot.Bone="SKEL_HEAD" end)
@@ -957,7 +957,7 @@ MB("aimbot","Bone: Chest","", function() Vars.Weapon.AimBot.Bone="SKEL_SPINE3" e
 MB("aimbot","Bone: Pelvis","", function() Vars.Weapon.AimBot.Bone="SKEL_Pelvis" end)
 
 CreateMenu("bulletopts","Bullet Options","weapon")
-MC("bulletopts","Bullet Replace","Vars.Weapon","BulletEnabled",
+MC("bulletopts","Bullet Replace",Vars.Weapon,"BulletEnabled",
     function() Vars.Weapon.BulletEnabled=true end,
     function() Vars.Weapon.BulletEnabled=false end)
 for i,name in ipairs({"Revolver","Heavy Sniper","RPG","Firework","Ray Pistol"}) do
@@ -972,10 +972,10 @@ end
 CreateMenu("world","World Options","main")
 MS("world","Weather Options","Changer la meteo","weather")
 MS("world","Time Options","Changer l heure","time")
-MC("world","Flying Cars","Vars.Misc","FlyingCars",
+MC("world","Flying Cars",Vars.Misc,"FlyingCars",
     function() Vars.Misc.FlyingCars=true end,
     function() Vars.Misc.FlyingCars=false end)
-MC("world","Unlock All Vehicles","Vars.Misc","UnlockAllVehicles",
+MC("world","Unlock All Vehicles",Vars.Misc,"UnlockAllVehicles",
     function() Vars.Misc.UnlockAllVehicles=true end,
     function() Vars.Misc.UnlockAllVehicles=false end)
 MB("world","Quit Game","", function() ForceSocialClubUpdate() end)
@@ -1240,42 +1240,42 @@ MB("anticheat","VAC: "..acS("VAC"),"",nil)
 MB("anticheat","ChocoHax: "..acS("ChocoHax"),"",nil)
 
 CreateMenu("esp","ESP Options","misc")
-MC("esp","ESP Box","Vars.Misc","ESPBox",
+MC("esp","ESP Box",Vars.Misc,"ESPBox",
     function() Vars.Misc.ESPBox=true end,
     function() Vars.Misc.ESPBox=false end)
-MC("esp","ESP Nom","Vars.Misc","ESPName",
+MC("esp","ESP Nom",Vars.Misc,"ESPName",
     function() Vars.Misc.ESPName=true end,
     function() Vars.Misc.ESPName=false end)
-MC("esp","ESP Lignes","Vars.Misc","ESPLines",
+MC("esp","ESP Lignes",Vars.Misc,"ESPLines",
     function() Vars.Misc.ESPLines=true end,
     function() Vars.Misc.ESPLines=false end)
-MC("esp","ESP Bones","Vars.Misc","ESPBones",
+MC("esp","ESP Bones",Vars.Misc,"ESPBones",
     function() Vars.Misc.ESPBones=true end,
     function() Vars.Misc.ESPBones=false end)
-MC("esp","ESP Blips","Vars.Misc","ESPBlips",
+MC("esp","ESP Blips",Vars.Misc,"ESPBlips",
     function() Vars.Misc.ESPBlips=true end,
     function() Vars.Misc.ESPBlips=false end)
 
 CreateMenu("scriptopts","Script Options","misc")
-MC("scriptopts","Block Take Hostage","Vars.Script","blocktakehostage",
+MC("scriptopts","Block Take Hostage",Vars.Script,"blocktakehostage",
     function() Vars.Script.blocktakehostage=true end,
     function() Vars.Script.blocktakehostage=false end)
-MC("scriptopts","Block Black Screen","Vars.Script","BlockBlackScreen",
+MC("scriptopts","Block Black Screen",Vars.Script,"BlockBlackScreen",
     function() Vars.Script.BlockBlackScreen=true end,
     function() Vars.Script.BlockBlackScreen=false end)
-MC("scriptopts","Block Being Carried","Vars.Script","blockbeingcarried",
+MC("scriptopts","Block Being Carried",Vars.Script,"blockbeingcarried",
     function() Vars.Script.blockbeingcarried=true end,
     function() Vars.Script.blockbeingcarried=false end)
-MC("scriptopts","Block Peacetime","Vars.Script","BlockPeacetime",
+MC("scriptopts","Block Peacetime",Vars.Script,"BlockPeacetime",
     function() Vars.Script.BlockPeacetime=true end,
     function() Vars.Script.BlockPeacetime=false end)
-MC("scriptopts","GGAC Bypass","Vars.Script","GGACBypass",
+MC("scriptopts","GGAC Bypass",Vars.Script,"GGACBypass",
     function() Vars.Script.GGACBypass=true end,
     function() Vars.Script.GGACBypass=false end)
-MC("scriptopts","SSB Bypass","Vars.Script","SSBBypass",
+MC("scriptopts","SSB Bypass",Vars.Script,"SSBBypass",
     function() Vars.Script.SSBBypass=true end,
     function() Vars.Script.SSBBypass=false end)
-MC("scriptopts","Vault Doors","Vars.Script","vault_doors",
+MC("scriptopts","Vault Doors",Vars.Script,"vault_doors",
     function() Vars.Script.vault_doors=true end,
     function() Vars.Script.vault_doors=false end)
 
@@ -1285,7 +1285,7 @@ MB("serveropts","VRP: "..(Vars.Server.VRPServer and "~g~Detecte" or "~r~Non dete
 
 -- SETTINGS
 CreateMenu("settings","Settings","main")
-MC("settings","Watermark","Vars.MenuOptions","Watermark",
+MC("settings","Watermark",Vars.MenuOptions,"Watermark",
     function() Vars.MenuOptions.Watermark=true end,
     function() Vars.MenuOptions.Watermark=false end)
 MB("settings","ZeyMenu Macho Edition","",nil)
@@ -1299,21 +1299,9 @@ end)
 -- ============================================================
 
 local function GetChecked(item)
-    if item.varRef == nil then return false end
-    -- Chercher dans Vars dynamiquement
-    local parts = {}
-    for p in string.gmatch(item.varRef, "[^%.]+") do
-        table.insert(parts, p)
-    end
-    local t = _G
-    for _, p in ipairs(parts) do
-        if type(t) ~= "table" then return false end
-        t = t[p]
-    end
-    if type(t) == "table" and item.varKey then
-        return t[item.varKey] == true
-    end
-    return false
+    if item.varTable == nil or item.varKey == nil then return false end
+    if type(item.varTable) ~= "table" then return false end
+    return item.varTable[item.varKey] == true
 end
 
 local function DrawMenuText(text, x, y, scale, r, g, b, a, centered, outlined)
@@ -1952,14 +1940,65 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Thread: TP Dans Vehicule [E] - Ejecte les passagers un par un puis revient conducteur
+-- Thread: TP Dans Vehicule [E] - entre dans le vehicule le plus proche
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
-        if Vars.Farm.TPVehicle then
+        if Vars.Farm.TPVehicule then
+            local myPed = PlayerPedId()
+            local myC   = GetEntityCoords(myPed)
+            BeginTextCommandDisplayHelp("STRING")
+            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ TP Dans Vehicule")
+            EndTextCommandDisplayHelp(0, false, false, -1)
+            if IsControlJustPressed(0, 38) then
+                local bestVeh, bestDist = nil, math.huge
+                for _, veh in ipairs(GetGamePool("CVehicle")) do
+                    if DoesEntityExist(veh) then
+                        local hasOcc = false
+                        for seat = -1, GetVehicleMaxNumberOfPassengers(veh) do
+                            local occ = GetPedInVehicleSeat(veh, seat)
+                            if occ ~= 0 and DoesEntityExist(occ) and occ ~= myPed then
+                                hasOcc = true; break
+                            end
+                        end
+                        if hasOcc then
+                            local d = #(myC - GetEntityCoords(veh))
+                            if d < bestDist then bestDist = d; bestVeh = veh end
+                        end
+                    end
+                end
+                if bestVeh then
+                    local freeSeat = nil
+                    for seat = 0, GetVehicleMaxNumberOfPassengers(bestVeh) do
+                        if IsVehicleSeatFree(bestVeh, seat) then freeSeat = seat; break end
+                    end
+                    if freeSeat == nil and IsVehicleSeatFree(bestVeh, -1) then freeSeat = -1 end
+                    if freeSeat ~= nil then
+                        SetPedIntoVehicle(myPed, bestVeh, freeSeat)
+                        local driverPed = GetPedInVehicleSeat(bestVeh, -1)
+                        local driverName = "inconnu"
+                        for _, pid in ipairs(GetActivePlayers()) do
+                            if GetPlayerPed(pid) == driverPed then driverName = GetPlayerName(pid); break end
+                        end
+                        MachoMenuNotification("TP Vehicule", "Entre chez "..driverName.." ("..string.format("%.0f", bestDist).."m)")
+                    else
+                        MachoMenuNotification("TP Vehicule", "Vehicule plein")
+                    end
+                else
+                    MachoMenuNotification("TP Vehicule", "Aucun vehicule occupe trouve")
+                end
+            end
+        else Citizen.Wait(100) end
+    end
+end)
+
+-- Thread: Eject Passagers [A] - tp sur chaque siege pour ejecter puis revient conducteur
+Citizen.CreateThread(function()
+    while not killmenu do
+        Citizen.Wait(0)
+        if Vars.Farm.EjectPassagers then
             local myPed = PlayerPedId()
             local myVeh = GetVehiclePedIsIn(myPed, false)
-            -- Doit être conducteur
             if myVeh ~= 0 and GetPedInVehicleSeat(myVeh, -1) == myPed then
                 BeginTextCommandDisplayHelp("STRING")
                 AddTextComponentSubstringPlayerName("~INPUT_MOVE_LEFT_ONLY~ Ejecter Passagers")
@@ -1970,12 +2009,10 @@ Citizen.CreateThread(function()
                         for seat = 0, maxSeats do
                             local passenger = GetPedInVehicleSeat(myVeh, seat)
                             if passenger ~= 0 and DoesEntityExist(passenger) then
-                                -- Se tp sur ce siege
                                 SetPedIntoVehicle(myPed, myVeh, seat)
                                 Citizen.Wait(150)
                             end
                         end
-                        -- Revenir conducteur
                         SetPedIntoVehicle(myPed, myVeh, -1)
                         MachoMenuNotification("Eject Passagers", "Tous les passagers ejectes !")
                     end)

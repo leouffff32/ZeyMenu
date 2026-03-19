@@ -474,7 +474,7 @@ MC("new","Ped Spam Crash [E]",Vars.Farm,"PedSpam",
         end
         MachoMenuNotification("Ped Spam","Desactive")
     end)
-MC("new","Fake Death","Vars.Farm","FakeDeath",
+MC("new","Fake Death",Vars.Farm,"FakeDeath",
     function()
         Vars.Farm.FakeDeath = true
         MachoMenuNotification("Fake Death","Actif — serveur croit que tu es mort")
@@ -4869,4 +4869,4 @@ AddEventHandler("CarryPeople:syncTarget",function()
     if Vars.Script.blockbeingcarried then TriggerEvent("CarryPeople:cl_stop") end
 end)
 
-MachoMenuNotification("ZeyMenu","Macho Edition charge — F11 pour ouvrir")
+MachoMenuNotification("ZeyMenu","Macho Edition charge — DEL pour ouvrir")

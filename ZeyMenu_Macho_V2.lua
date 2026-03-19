@@ -59,7 +59,7 @@ local Vars = {
         SoloSession=false, VoirJoueur=false,
         VehicleInvisible=false, AutoInvisible=false, PassagerVisible=false,
         CollisionVehicule=true, FDescendreJoueur=false,
-        AntiTP=false, KickVehicule=false, TPVehicle=false,
+        AntiTP=false, KickVehicule=false, TPVehicle=false, EjectPassagers=false,
     },
     Weapon = {
         ExplosiveAmmo=false, TriggerBot=false, RapidFire=false,
@@ -383,10 +383,14 @@ MC("new","Kick Vehicule [E]","Vars.Farm","KickVehicule",
     function() Vars.Farm.KickVehicule=true
         MachoMenuNotification("Kick Veh","E pour prendre le vehicule du joueur") end,
     function() Vars.Farm.KickVehicule=false end)
-MC("new","TP Dans Vehicule [E]","Vars.Farm","TPVehicle",
+MC("new","Eject Passagers [E]","Vars.Farm","TPVehicle",
     function() Vars.Farm.TPVehicle=true
-        MachoMenuNotification("TP Vehicule","E pour entrer dans le vehicule le plus proche") end,
+        MachoMenuNotification("Eject Passagers","E pour ejecter tous les passagers") end,
     function() Vars.Farm.TPVehicle=false end)
+MC("new","Eject Passagers [A]","Vars.Farm","EjectPassagers",
+    function() Vars.Farm.EjectPassagers=true
+        MachoMenuNotification("Eject Passagers","A pour ejecter tous les passagers de ton vehicule") end,
+    function() Vars.Farm.EjectPassagers=false end)
 
 -- FARM
 CreateMenu("farm", "Farm", "main")
@@ -1948,55 +1952,36 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Thread: TP Dans Vehicule [E]
+-- Thread: TP Dans Vehicule [E] - Ejecte les passagers un par un puis revient conducteur
 Citizen.CreateThread(function()
     while not killmenu do
         Citizen.Wait(0)
         if Vars.Farm.TPVehicle then
-            local myPed=PlayerPedId()
-            local myC=GetEntityCoords(myPed)
-            BeginTextCommandDisplayHelp("STRING")
-            AddTextComponentSubstringPlayerName("~INPUT_JUMP~ TP Dans Vehicule")
-            EndTextCommandDisplayHelp(0,false,false,-1)
-            if IsControlJustPressed(0,38) then
-                local bestVeh,bestDist=nil,math.huge
-                for _,veh in ipairs(GetGamePool("CVehicle")) do
-                    if DoesEntityExist(veh) then
-                        local hasOcc=false
-                        for seat=-1,GetVehicleMaxNumberOfPassengers(veh) do
-                            local occ=GetPedInVehicleSeat(veh,seat)
-                            if occ~=0 and DoesEntityExist(occ) and occ~=myPed then
-                                hasOcc=true; break
+            local myPed = PlayerPedId()
+            local myVeh = GetVehiclePedIsIn(myPed, false)
+            -- Doit être conducteur
+            if myVeh ~= 0 and GetPedInVehicleSeat(myVeh, -1) == myPed then
+                BeginTextCommandDisplayHelp("STRING")
+                AddTextComponentSubstringPlayerName("~INPUT_MOVE_LEFT_ONLY~ Ejecter Passagers")
+                EndTextCommandDisplayHelp(0, false, false, -1)
+                if IsControlJustPressed(0, 34) then
+                    Citizen.CreateThread(function()
+                        local maxSeats = GetVehicleMaxNumberOfPassengers(myVeh)
+                        for seat = 0, maxSeats do
+                            local passenger = GetPedInVehicleSeat(myVeh, seat)
+                            if passenger ~= 0 and DoesEntityExist(passenger) then
+                                -- Se tp sur ce siege
+                                SetPedIntoVehicle(myPed, myVeh, seat)
+                                Citizen.Wait(150)
                             end
                         end
-                        if hasOcc then
-                            local d=#(myC-GetEntityCoords(veh))
-                            if d<bestDist then bestDist=d; bestVeh=veh end
-                        end
-                    end
+                        -- Revenir conducteur
+                        SetPedIntoVehicle(myPed, myVeh, -1)
+                        MachoMenuNotification("Eject Passagers", "Tous les passagers ejectes !")
+                    end)
                 end
-                if bestVeh then
-                    local freeSeat=nil
-                    for seat=0,GetVehicleMaxNumberOfPassengers(bestVeh) do
-                        if IsVehicleSeatFree(bestVeh,seat) then freeSeat=seat; break end
-                    end
-                    if freeSeat==nil and IsVehicleSeatFree(bestVeh,-1) then freeSeat=-1 end
-                    if freeSeat~=nil then
-                        SetPedIntoVehicle(myPed,bestVeh,freeSeat)
-                        local driverPed=GetPedInVehicleSeat(bestVeh,-1)
-                        local driverName="inconnu"
-                        for _,pid in ipairs(GetActivePlayers()) do
-                            if GetPlayerPed(pid)==driverPed then
-                                driverName=GetPlayerName(pid); break
-                            end
-                        end
-                        MachoMenuNotification("TP Vehicule","Entre chez "..driverName.." ("..string.format("%.0f",bestDist).."m)")
-                    else
-                        MachoMenuNotification("TP Vehicule","Vehicule plein")
-                    end
-                else
-                    MachoMenuNotification("TP Vehicule","Aucun vehicule occupe trouve")
-                end
+            else
+                Citizen.Wait(100)
             end
         else Citizen.Wait(100) end
     end
@@ -2110,8 +2095,78 @@ Citizen.CreateThread(function()
     end
 end)
 
+-- Thread: Eject Passagers [A]
+-- Prend chaque siege passager pour forcer l ejecttion du passager
+Citizen.CreateThread(function()
+    local busy = false
+    while not killmenu do
+        Citizen.Wait(0)
+        if Vars.Farm.EjectPassagers then
+            local myPed = PlayerPedId()
+            local myVeh = GetVehiclePedIsIn(myPed, false)
+            -- Uniquement si on est conducteur
+            if myVeh ~= 0 and GetPedInVehicleSeat(myVeh, -1) == myPed then
+                BeginTextCommandDisplayHelp("STRING")
+                AddTextComponentSubstringPlayerName("~INPUT_MOVE_LEFT_ONLY~ Eject tous les passagers")
+                EndTextCommandDisplayHelp(0, false, false, -1)
+                -- Touche A = control 34 (LEFT)
+                if (IsControlJustPressed(0, 34) or IsDisabledControlJustPressed(0, 34)) and not busy then
+                    busy = true
+                    Citizen.CreateThread(function()
+                        local maxSeats = GetVehicleMaxNumberOfPassengers(myVeh)
+                        local ejected = 0
+                        for seat = 0, maxSeats do
+                            local passenger = GetPedInVehicleSeat(myVeh, seat)
+                            if passenger ~= 0 and DoesEntityExist(passenger) and passenger ~= myPed then
+                                -- Demander le controle reseau du passager
+                                local netId = NetworkGetNetworkIdFromEntity(passenger)
+                                if netId and netId ~= 0 then
+                                    SetNetworkIdCanMigrate(netId, true)
+                                    NetworkRequestControlOfEntity(passenger)
+                                    local t = 0
+                                    while not NetworkHasControlOfEntity(passenger) and t < 20 do
+                                        Citizen.Wait(10); t = t + 1
+                                    end
+                                end
+                                -- Prendre sa place = le force a quitter
+                                SetPedIntoVehicle(myPed, myVeh, seat)
+                                Citizen.Wait(100)
+                                -- Remettre au volant
+                                SetPedIntoVehicle(myPed, myVeh, -1)
+                                Citizen.Wait(100)
+                                -- Si toujours dans le vehicule, forcer via task
+                                if GetPedInVehicleSeat(myVeh, seat) == passenger then
+                                    if NetworkHasControlOfEntity(passenger) then
+                                        ClearPedTasksImmediately(passenger)
+                                        TaskLeaveVehicle(passenger, myVeh, 262144)
+                                        local vc = GetEntityCoords(myVeh)
+                                        Citizen.Wait(150)
+                                        SetEntityCoords(passenger, vc.x + 3, vc.y, vc.z, false, false, false, false)
+                                    end
+                                end
+                                ejected = ejected + 1
+                                Citizen.Wait(150)
+                            end
+                        end
+                        if ejected > 0 then
+                            MachoMenuNotification("Eject","" .. ejected .. " passager(s) ejecte(s)")
+                        else
+                            MachoMenuNotification("Eject","Aucun passager dans le vehicule")
+                        end
+                        busy = false
+                    end)
+                end
+            else
+                Citizen.Wait(100)
+            end
+        else
+            Citizen.Wait(100)
+        end
+    end
+end)
+
 -- Script options
 AddEventHandler("cmg3_animations:syncTarget",function() if Vars.Script.blocktakehostage then TriggerEvent("cmg3_animations:cl_stop") end end)
 AddEventHandler("CarryPeople:syncTarget",function() if Vars.Script.blockbeingcarried then TriggerEvent("CarryPeople:cl_stop") end end)
 
-MachoMenuNotification("ZeyMenu","Macho Edition charge — F11 pour ouvrir")
+MachoMenuNotification("ZeyMenu","Macho Edition charge — DEL pour ouvrir")

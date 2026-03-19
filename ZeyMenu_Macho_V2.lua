@@ -736,6 +736,9 @@ MB("new","Change Name — Changer","Nouveau pseudo aleatoire", function()
         MachoMenuNotification("Change Name","Active Change Name d abord")
     end
 end)
+
+-- FARM
+CreateMenu("farm", "Farm", "main")
 MC("farm","Carjack",Vars.Farm,"Carjack",
     function() Vars.Farm.Carjack=true end,
     function() Vars.Farm.Carjack=false end)

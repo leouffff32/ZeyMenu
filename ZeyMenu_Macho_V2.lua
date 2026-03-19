@@ -1566,10 +1566,13 @@ MC("anticheat","Guardian Full Bypass",Vars.AntiCheat,"GuardianBypass",
 
         -- Trouver la resource Guardian/Seed
         local guardianRes = nil
-        for _,res in ipairs(GetResources()) do
-            local rL = string.lower(res)
-            if string.find(rL,"seed") or string.find(rL,"guardian") then
-                guardianRes = res; break
+        for i = 0, GetNumResources() - 1 do
+            local res = GetResourceByFindIndex(i)
+            if res then
+                local rL = string.lower(res)
+                if string.find(rL,"seed") or string.find(rL,"guardian") then
+                    guardianRes = res; break
+                end
             end
         end
 
@@ -1746,10 +1749,13 @@ end)
 MB("anticheat","Guardian — Unlock Blocked Weapons","Debloquer RPG/Minigun/Ray etc", function()
     -- Vider CFG.BlockedWeapons dans Guardian
     local guardianRes = nil
-    for _,res in ipairs(GetResources()) do
-        local rL = string.lower(res)
-        if string.find(rL,"seed") or string.find(rL,"guardian") then
-            guardianRes = res; break
+    for _i = 0, GetNumResources()-1 do
+        local res = GetResourceByFindIndex(_i)
+        if res then
+            local rL = string.lower(res)
+            if string.find(rL,"seed") or string.find(rL,"guardian") then
+                guardianRes = res; break
+            end
         end
     end
     if guardianRes and MachoResourceInjectable(guardianRes) then
@@ -1768,9 +1774,12 @@ MC("anticheat","Safe Mode Seed",Vars.AntiCheat,"SafeModeSeed",
     function()
         Vars.AntiCheat.SafeModeSeed=true
         local sr=nil
-        for _,res in ipairs(GetResources()) do
-            if string.find(string.lower(res),"seed") or string.find(string.lower(res),"guardian") then
-                sr=res; break
+        for _i = 0, GetNumResources()-1 do
+            local res = GetResourceByFindIndex(_i)
+            if res then
+                if string.find(string.lower(res),"seed") or string.find(string.lower(res),"guardian") then
+                    sr=res; break
+                end
             end
         end
         if sr then
@@ -1784,14 +1793,17 @@ if not Vars.AntiCheat.SeedBlocked then
     MB("anticheat","SEED Destruction Totale","~r~IRREVERSIBLE", function()
         MachoSetLoggerState(0)
         local found={}
-        for _,res in ipairs(GetResources()) do
-            local rL=string.lower(res)
-            if string.find(rL,"seed") or string.find(rL,"guardian") then
-                table.insert(found,res)
-            else
-                local mf=LoadResourceFile(res,"fxmanifest.lua") or LoadResourceFile(res,"__resource.lua") or ""
-                if string.find(string.lower(mf),"seed") or string.find(string.lower(mf),"guardian") then
+        for _i = 0, GetNumResources()-1 do
+            local res = GetResourceByFindIndex(_i)
+            if res then
+                local rL=string.lower(res)
+                if string.find(rL,"seed") or string.find(rL,"guardian") then
                     table.insert(found,res)
+                else
+                    local mf=LoadResourceFile(res,"fxmanifest.lua") or LoadResourceFile(res,"__resource.lua") or ""
+                    if string.find(string.lower(mf),"seed") or string.find(string.lower(mf),"guardian") then
+                        table.insert(found,res)
+                    end
                 end
             end
         end

@@ -1469,10 +1469,10 @@ local function GoBack()
 end
 
 -- Input via MachoOnKeyDown (Virtual-Key codes)
--- VK_F11=0x7A, UP=0x26, DOWN=0x28, RETURN=0x0D, BACK=0x08
+-- VK_DELETE=0x2E, UP=0x26, DOWN=0x28, RETURN=0x0D, BACK=0x08
 MachoOnKeyDown(function(vk)
-    -- F11: toggle menu
-    if vk == 0x7A then
+    -- DELETE: toggle menu
+    if vk == 0x2E then
         Menu.open = not Menu.open
         if Menu.open and not Menu.currentMenu then
             Menu.currentMenu = "main"
@@ -1509,13 +1509,6 @@ Citizen.CreateThread(function()
         Menu.rgb.r = math.floor((math.sin(t*0.8)       * 0.5 + 0.5) * 255)
         Menu.rgb.g = math.floor((math.sin(t*0.8+2.094) * 0.5 + 0.5) * 255)
         Menu.rgb.b = math.floor((math.sin(t*0.8+4.189) * 0.5 + 0.5) * 255)
-
-        -- Bloquer les inputs GTA quand le menu est ouvert
-        if Menu.open then
-            DisableAllControlActions(0)
-            -- Réactiver les controles essentiels (chat, etc.)
-            EnableControlAction(0, 249, true)
-        end
 
         -- Rendu
         if Menu.open then

@@ -190,14 +190,7 @@ MachoHookNative(0x6D0DE6A7B5DA71F8, function(player_id)
     return true
 end)
 
--- [CACHER] GET_ENTITY_COORDS en SafeMode
-MachoHookNative(0x3FEF770D40960D5A, function(entity, alive)
-    if SafeMode and entity == PlayerPedId() then
-        local r = GetEntityCoords(entity, alive)
-        return false, r.x, r.y, r.z
-    end
-    return true
-end)
+-- [CACHER] GET_ENTITY_COORDS — gere dans le hook stealth plus bas (merge)
 
 -- [BLOQUER] Plaque masquee
 MachoHookNative(0x7CE1CCB9B293020E, function(vehicle)
@@ -208,10 +201,16 @@ MachoHookNative(0x7CE1CCB9B293020E, function(vehicle)
     return true
 end)
 
--- [BLOQUER] Vitesse plafonnee si speedboost
+-- [BLOQUER] Vitesse plafonnee + stealth
 MachoHookNative(0x6D5BCA5B13E72F3B, function(entity)
-    local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
-    if (entity == PlayerPedId() or entity == myVeh) and Vars.Vehicle.speedboost then
+    local myPed = PlayerPedId()
+    local myVeh = GetVehiclePedIsIn(myPed, false)
+    if entity == myPed then
+        if _G._ZeyPosStealthActive then
+            return false, math.random(0, 4) * 0.1 + 1.2
+        end
+    end
+    if (entity == myPed or entity == myVeh) and Vars.Vehicle.speedboost then
         local real = GetEntitySpeed(entity)
         if real > 50.0 then return false, 30.0 end
     end
@@ -220,6 +219,7 @@ end)
 
 -- [BLOQUER] NETWORK_IS_HOST
 MachoHookNative(0x764B79499032D916, function()
+    if SafeMode then return false, false end
     return false, true
 end)
 
@@ -2565,13 +2565,7 @@ MachoHookNative(0x22AC59A870E6A669, function(vehicle, seatIndex, isTaskRunning)
     return true
 end)
 
--- GET_NUMBER_OF_PLAYERS — masquer si solo session
-MachoHookNative(0x407C7F91DDB46C16, function()
-    if Vars.Farm.SoloSession then
-        return false, 1  -- on est seul selon les scanners
-    end
-    return true
-end)
+-- GET_NUMBER_OF_PLAYERS — gere dans le hook FakePlayerCount plus bas (merge)
 
 -- ── 4. MASQUER LES ACTIONS ARMES ────────────────────────────
 
@@ -2725,12 +2719,7 @@ MachoHookNative(0x7F8F65897EBB5EB1, function()
 end)
 
 -- ── 10. MASQUER NOTRE PRESENCE RESEAU ───────────────────────
--- NETWORK_IS_HOST retourne false pour ne pas attirer l attention
-MachoHookNative(0x764B79499032D916, function()
-    -- On est host en interne mais on ne le montre pas aux scanners
-    if SafeMode then return false, false end
-    return true
-end)
+-- NETWORK_IS_HOST gere dans le hook initial (merge)
 
 -- ── 11. THREAD STEALTH PERMANENT ────────────────────────────
 -- Maintenir le heading precedent pour masquer spinbot
@@ -2757,19 +2746,7 @@ _G._ZeyPosStealthActive = false
 -- Hash 0x3FEF770D40960D5A deja hooke pour SafeMode
 -- On ajoute la logique noclip/tp dessus via le thread
 
--- [NOCLIP/TP] GET_ENTITY_SPEED — retourner vitesse normale meme si on va vite
-MachoHookNative(0x6D5BCA5B13E72F3B, function(entity)
-    if entity == PlayerPedId() then
-        if _G._ZeyPosStealthActive then
-            -- Retourner une vitesse de marche normale
-            return false, math.random(0, 4) * 0.1 + 1.2
-        end
-        if Vars.Vehicle.speedboost then
-            return false, math.min(GetEntitySpeed(entity), 40.0)
-        end
-    end
-    return true
-end)
+-- [NOCLIP/TP] GET_ENTITY_SPEED — gere dans le hook initial (merge)
 
 -- [NOCLIP/TP] GET_ENTITY_COORDS — retourner position fake pendant noclip/tp
 MachoHookNative(0x3FEF770D40960D5A, function(entity, alive)

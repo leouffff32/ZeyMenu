@@ -523,6 +523,7 @@ MC("new","TP Ocean [A]",Vars.Farm,"TPOcean",
         Vars.Farm.TPOcean = false
         MachoMenuNotification("TP Ocean","Desactive")
     end)
+MC("new","Cage Joueur [E]",Vars.Farm,"CageJoueur",
     function()
         Vars.Farm.CageJoueur=true
         MachoMenuNotification("Cage","E pour cager le joueur le plus proche")

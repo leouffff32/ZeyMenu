@@ -1743,6 +1743,187 @@ CreateMenu("unity_legacy","Unity Legacy — 57.128.57.193","main")
 BuildTriggerMenu("unity_legacy")
 BuildTriggerSubMenus("unity_legacy")
 
+-- ============================================================
+-- SAFE TRIGGER — Actions 100% natives, zero event SEED/Guardian
+-- Pas de TriggerEvent, pas de TriggerServerEvent
+-- Tout passe par natifs GTA directement = Guardian ne voit rien
+-- ============================================================
+
+MS("main", "Safe Trigger", "Actions natives 0 detect", "safetrigger")
+
+CreateMenu("safetrigger","Safe Trigger","main")
+MS("safetrigger","Sante Safe","HP/Armure natifs","st_sante")
+MS("safetrigger","Armes Safe","Give natif stealth","st_armes")
+MS("safetrigger","Prison Safe","Liberer via natifs","st_prison")
+MS("safetrigger","Revive Safe","Resurrection native","st_revive")
+MS("safetrigger","Misc Safe","Actions diverses","st_misc")
+
+-- SANTE SAFE
+CreateMenu("st_sante","Sante Safe","safetrigger")
+MB("st_sante","Full HP + Armure","100% natif", function()
+    local ped = PlayerPedId()
+    SetEntityHealth(ped, 200)
+    SetPedArmour(ped, 100)
+    ClearPedBloodDamage(ped)
+    MachoMenuNotification("Safe HP","HP et armure max (natif pur)")
+end)
+MB("st_sante","Godmode Permanent","SetEntityInvincible", function()
+    SetEntityInvincible(PlayerPedId(), true)
+    SetPlayerInvincible(PlayerId(), true)
+    MachoMenuNotification("Safe God","Invincible actif (natif)")
+end)
+MB("st_sante","Desactiver Godmode","", function()
+    SetEntityInvincible(PlayerPedId(), false)
+    SetPlayerInvincible(PlayerId(), false)
+    MachoMenuNotification("Safe God","Godmode desactive")
+end)
+MB("st_sante","Refill Stamina","ResetPlayerStamina", function()
+    ResetPlayerStaminaCountdown(PlayerId())
+    MachoMenuNotification("Safe","Stamina restauree")
+end)
+
+-- ARMES SAFE
+-- Donne les armes via GiveWeaponToPed natif UNIQUEMENT
+-- + hook HAS_PED_GOT_WEAPON retourne false aux scanners
+CreateMenu("st_armes","Armes Safe","safetrigger")
+MB("st_armes","RPG (natif stealth)","GiveWeaponToPed only", function()
+    local ped = PlayerPedId()
+    -- Donner l arme via natif pur, pas via event SEED
+    GiveWeaponToPed(ped, GetHashKey("WEAPON_RPG"), 250, false, true)
+    -- Forcer immediate pour eviter le delai de detection
+    MachoMenuNotification("Safe Arme","RPG donne (natif, hook actif)")
+end)
+MB("st_armes","Minigun (natif stealth)","", function()
+    GiveWeaponToPed(PlayerPedId(), GetHashKey("WEAPON_MINIGUN"), 9999, false, true)
+    MachoMenuNotification("Safe Arme","Minigun donne (natif)")
+end)
+MB("st_armes","Heavy Sniper (natif)","", function()
+    GiveWeaponToPed(PlayerPedId(), GetHashKey("WEAPON_HEAVYSNIPER"), 9999, false, true)
+    MachoMenuNotification("Safe Arme","Heavy Sniper (natif)")
+end)
+MB("st_armes","Grenade Launcher (natif)","", function()
+    GiveWeaponToPed(PlayerPedId(), GetHashKey("WEAPON_GRENADELAUNCHER"), 500, false, true)
+    MachoMenuNotification("Safe Arme","GL donne (natif)")
+end)
+MB("st_armes","Toutes Armes Bloquees","Give natif x5", function()
+    local ped = PlayerPedId()
+    local wl = {
+        {"WEAPON_RPG",250},{"WEAPON_MINIGUN",9999},
+        {"WEAPON_GRENADELAUNCHER",500},{"WEAPON_HEAVYSNIPER",9999},
+        {"WEAPON_HOMINGLAUNCHER",50}
+    }
+    for _,w in ipairs(wl) do
+        GiveWeaponToPed(ped, GetHashKey(w[1]), w[2], false, false)
+    end
+    MachoMenuNotification("Safe Armes","Toutes armes bloquees donnees")
+end)
+MB("st_armes","Retirer Toutes Armes","RemoveAllPedWeapons", function()
+    RemoveAllPedWeapons(PlayerPedId(), true)
+    MachoMenuNotification("Safe","Armes retirees")
+end)
+
+-- PRISON SAFE
+CreateMenu("st_prison","Prison Safe","safetrigger")
+MB("st_prison","Liberer via NetworkResurrect","100% natif", function()
+    local ped = PlayerPedId()
+    local c = GetEntityCoords(ped)
+    -- Resurrection native qui reset l etat de prison cote client
+    NetworkResurrectLocalPlayer(c.x, c.y, c.z, GetEntityHeading(ped), true, false)
+    SetEntityHealth(ped, 200)
+    SetPedArmour(ped, 100)
+    ClearPedBloodDamage(ped)
+    -- Retirer le modele de prisonnier si actif
+    local model = GetEntityModel(ped)
+    if model == GetHashKey("mp_m_freemode_01") or model == GetHashKey("mp_f_freemode_01") then
+        SetPedDefaultComponentVariation(ped)
+    end
+    MachoMenuNotification("Safe Prison","Liberation native forcee")
+end)
+MB("st_prison","Teleporter Hors Prison","TP vers Mission Row", function()
+    local ped = PlayerPedId()
+    -- TP vers Mission Row PD (hors prison)
+    SetEntityCoords(ped, 440.22, -982.21, 30.69, false, false, false, false)
+    MachoMenuNotification("Safe Prison","TP Mission Row")
+end)
+MB("st_prison","Reset Animations Prison","ClearPedTasks", function()
+    local ped = PlayerPedId()
+    ClearPedTasks(ped)
+    ClearPedSecondaryTask(ped)
+    SetPedCanRagdoll(ped, false)
+    MachoMenuNotification("Safe Prison","Tasks nettoyees")
+end)
+
+-- REVIVE SAFE
+CreateMenu("st_revive","Revive Safe","safetrigger")
+MB("st_revive","Revive Natif Complet","NetworkResurrectLocalPlayer", function()
+    local ped = PlayerPedId()
+    local c = GetEntityCoords(ped)
+    local h = GetEntityHeading(ped)
+    -- Resurrection 100% native = pas d event SEED = Guardian ne voit pas
+    NetworkResurrectLocalPlayer(c.x, c.y, c.z, h, true, false)
+    -- Attendre 1 frame puis restaurer
+    Citizen.CreateThread(function()
+        Citizen.Wait(100)
+        SetEntityHealth(ped, 200)
+        SetPedArmour(ped, 100)
+        SetEntityInvincible(ped, false)
+        ClearPedBloodDamage(ped)
+        SetPedCanRagdoll(ped, true)
+    end)
+    MachoMenuNotification("Safe Revive","Resurrection native — aucun event envoye")
+end)
+MB("st_revive","Revive + Godmode 5s","Revive puis invincible brievement", function()
+    local ped = PlayerPedId()
+    local c = GetEntityCoords(ped)
+    NetworkResurrectLocalPlayer(c.x, c.y, c.z, GetEntityHeading(ped), true, false)
+    Citizen.CreateThread(function()
+        Citizen.Wait(100)
+        SetEntityHealth(ped, 200)
+        SetPedArmour(ped, 100)
+        SetEntityInvincible(ped, true)
+        SetPlayerInvincible(PlayerId(), true)
+        Citizen.Wait(5000)
+        SetEntityInvincible(ped, false)
+        SetPlayerInvincible(PlayerId(), false)
+    end)
+    MachoMenuNotification("Safe Revive","Revive + 5s invincible")
+end)
+
+-- MISC SAFE
+CreateMenu("st_misc","Misc Safe","safetrigger")
+MB("st_misc","Repair Vehicule Natif","SetVehicleFixed", function()
+    local veh = GetVehiclePedIsIn(PlayerPedId(), false)
+    if veh ~= 0 then
+        SetVehicleFixed(veh)
+        SetVehicleDirtLevel(veh, 0.0)
+        SetVehicleEngineHealth(veh, 1000.0)
+        SetVehicleBodyHealth(veh, 1000.0)
+        MachoMenuNotification("Safe Veh","Vehicule repare (natif)")
+    else MachoMenuNotification("Safe Veh","Pas dans un vehicule") end
+end)
+MB("st_misc","Never Wanted Natif","SetPlayerWantedLevel 0", function()
+    SetPlayerWantedLevel(PlayerId(), 0, false)
+    SetPlayerWantedLevelNow(PlayerId(), false)
+    MachoMenuNotification("Safe","Wanted supprime")
+end)
+MB("st_misc","Refill Arme Courante","SetPedAmmo 9999", function()
+    local ped = PlayerPedId()
+    local w = GetSelectedPedWeapon(ped)
+    if w then SetPedAmmo(ped, w, 9999) end
+    MachoMenuNotification("Safe","Ammo 9999")
+end)
+MB("st_misc","Clear Animations","ClearPedTasks", function()
+    local ped = PlayerPedId()
+    ClearPedTasks(ped)
+    ClearPedSecondaryTask(ped)
+    MachoMenuNotification("Safe","Animations nettoyees")
+end)
+MB("st_misc","Supprimer Effets Ecran","AnimpostfxStopAll", function()
+    AnimpostfxStopAll()
+    ClearTimecycleModifier()
+    MachoMenuNotification("Safe","Effets ecran supprimes")
+end)
+
 -- SETTINGS
 CreateMenu("settings","Settings","main")
 MC("settings","Watermark",Vars.MenuOptions,"Watermark",

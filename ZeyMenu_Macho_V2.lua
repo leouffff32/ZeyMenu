@@ -300,11 +300,6 @@ MachoHookNative(0x0A6DB4965674D243, function(ped)
     return true
 end)
 
--- [STEALTH] GET_PED_CAUSE_OF_DEATH — masquer cause de mort avec arme bloquee
-MachoHookNative(0x63F9F6BFC9B4ABDC, function(ped)
-    return false, _safeWeapon
-end)
-
 -- ============================================================
 -- MACHO INJECT au demarrage
 -- ============================================================
@@ -341,30 +336,69 @@ MachoInjectResource2(3, "any", [[
     end
 ]])
 
--- [WEAPON STEALTH] Vider CFG.BlockedWeapons dans Guardian au demarrage
--- + bloquer l event 'blev' qui reporte nos armes
+-- [WEAPON STEALTH] Bypass complet Guardian — bloquer tous les events de detection
+-- GARDER st/hb (heartbeat) sinon kick instantane
+-- Bloquer tout le reste : iven/it/rf/fc/rcm/sm/blev + events .verify/.getEvents
 MachoInjectResource2(3, "any", [[
-    -- Bloquer le reporter Guardian
     local _oTSE = TriggerServerEvent
+    -- Whitelist: SEULEMENT st et hb passent (heartbeats Guardian)
+    -- Tout le reste est bloque silencieusement
+    local _guardianWhitelist = { st=true, hb=true }
+    local _guardianBlocked = {
+        blev=true, iven=true, it=true, rf=true,
+        fc=true, rcm=true, sm=true, tk=true
+    }
     TriggerServerEvent = function(name, ...)
-        if name == "blev" then return end
-        if name == "st" or name == "hb" or name == "iven" or
-           name == "it" or name == "rf" or name == "fc" or
-           name == "rcm" or name == "sm" then return end
+        if name then
+            -- Bloquer tous les events Guardian de detection
+            if _guardianBlocked[name] then return end
+            -- Bloquer patterns suspects (anticheat, violation, report...)
+            local nl = string.lower(tostring(name))
+            if string.find(nl,"anticheat") or string.find(nl,"violation") or
+               string.find(nl,"detect") or string.find(nl,"report") or
+               string.find(nl,"exploit") or string.find(nl,"cheat") then
+                return
+            end
+        end
         return _oTSE(name, ...)
     end
-    -- Vider BlockedWeapons si accessible
+
+    -- Bloquer les handlers .verify/.getEvents/.getServerEvents que Guardian
+    -- enregistre sur chaque resource pour surveiller les events
+    local _oAEH = AddEventHandler
+    AddEventHandler = function(name, cb)
+        if name then
+            if string.find(tostring(name), "%.verify$") or
+               string.find(tostring(name), "%.getEvents$") or
+               string.find(tostring(name), "%.getServerEvents$") then
+                return _oAEH(name, function() end)
+            end
+            if name == "onClientResourceStart" or
+               name == "onClientResourceStop" then
+                return _oAEH(name, function() end)
+            end
+        end
+        return _oAEH(name, cb)
+    end
+
+    -- Vider BlockedWeapons + neutraliser detection armes apres chargement
     Citizen.CreateThread(function()
-        Citizen.Wait(2000)
-        if _G.CFG and _G.CFG.BlockedWeapons then
-            _G.CFG.BlockedWeapons = {}
+        Citizen.Wait(3000)
+        if _G.CFG then
+            if _G.CFG.BlockedWeapons then _G.CFG.BlockedWeapons = {} end
+            if _G.CFG.BlockedPopulationVehicles then _G.CFG.BlockedPopulationVehicles = {} end
         end
-        -- Neutraliser la detection des armes dans Guardian
-        if _G.m and _G.m.GetWeaponName then
-            _G.m.GetWeaponName = function(hash) return "inconnu" end
+        if _G.m then
+            if _G.m.GetWeaponName then
+                _G.m.GetWeaponName = function() return "inconnu" end
+            end
+            if _G.m.TranslateDeathCause then
+                _G.m.TranslateDeathCause = function() return "inconnu" end
+            end
         end
-        if _G.m and _G.m.TranslateDeathCause then
-            _G.m.TranslateDeathCause = function(hash) return "inconnu" end
+        -- Neutraliser SEED.GetWeaponFromHash
+        if _G.SEED and _G.SEED.GetWeaponFromHash then
+            _G.SEED.GetWeaponFromHash = function() return nil end
         end
     end)
 ]])

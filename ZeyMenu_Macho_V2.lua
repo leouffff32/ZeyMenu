@@ -153,7 +153,10 @@ local Vars = {
 
 local function GetResources()
     local r={}
-    for i=1,GetNumResources() do r[i]=GetResourceByFindIndex(i) end
+    for i=0,GetNumResources()-1 do
+        local res=GetResourceByFindIndex(i)
+        if res then r[#r+1]=res end
+    end
     return r
 end
 local Resources = GetResources()
